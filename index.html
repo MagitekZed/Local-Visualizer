@@ -1,1 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Visualizer</title>
+    <!-- Link to our base styles. These styles lay out the page and
+         establish a dark background with light text. -->
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Local Visualizer</h1>
+    </header>
+    <main>
+      <!-- File picker: allow users to choose one or more audio files.  -->
+      <div class="picker">
+        <label for="file-input">Select audio files:</label>
+        <input id="file-input" type="file" accept="audio/*" multiple />
+      </div>
 
+      <!-- Controls: choose visualizer preset and play/pause the current track.  -->
+      <div class="controls">
+        <label for="visualizer-select">Visualizer:</label>
+        <select id="visualizer-select">
+          <option value="bars" selected>Bars</option>
+          <option value="circle">Circle</option>
+        </select>
+        <button id="play-btn" disabled>Play</button>
+        <button id="pause-btn" disabled>Pause</button>
+      </div>
+
+      <!-- Canvas element where our visuals will be rendered.  -->
+      <canvas id="visualizer-canvas" width="800" height="300"></canvas>
+    </main>
+
+    <!-- Application bootstrap script. This script pulls in the core
+         functionality, sets up the audio graph, and manages the user
+         interface interactions. -->
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
