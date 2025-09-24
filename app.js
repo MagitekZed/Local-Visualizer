@@ -1,4 +1,4 @@
-/* Local Jukebox + Visualizer (MVP, no libs) */
+/* app.js */
 (() => {
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -16,6 +16,7 @@
   const seekEl = $("#seek");
   const volEl = $("#volume");
   const cinemaBtn = $("#btn-cinema");
+  const exitCinemaBtn = $("#btn-exit-cinema");
   const qualitySel = $("#quality");
 
   // Resize canvas
@@ -25,7 +26,6 @@
     canvas.width = Math.floor(w * dpr);
     canvas.height = Math.floor(h * dpr);
     ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // redraw background instantly
     ctx2d.fillStyle = "#07090c";
     ctx2d.fillRect(0, 0, w, h);
   }
@@ -39,19 +39,17 @@
   let timeData = null;
 
   const STATE = {
-    tracks: [],      // { id, file, name, url, duration }
+    tracks: [],
     current: -1,
     playing: false,
     rafId: null,
     quality: "high",
-    // visual buffers
-    bars: 48,                // visualized groups
-    smoothing: 0.82,         // analyser smoothing
-    peakHold: [],            // per-bar peak hold
-    peakDecay: 0.01,         // decay per frame
+    bars: 48,
+    smoothing: 0.82,
+    peakHold: [],
+    peakDecay: 0.01,
   };
 
-  // Utility
   const fmtTime = (sec) => {
     if (!isFinite(sec)) sec = 0;
     const m = Math.floor(sec / 60);
@@ -80,7 +78,6 @@
     analyser.connect(audioCtx.destination);
   }
 
-  // Library management
   function addFiles(fileList) {
     const files = Array.from(fileList).filter(f => f.type.startsWith("audio/"));
     if (!files.length) return;
@@ -119,7 +116,6 @@
 
   function loadTrack(idx, autoplay=false) {
     if (idx < 0 || idx >= STATE.tracks.length) return;
-    const prev = STATE.current;
     STATE.current = idx;
     $$(".track-list li").forEach((li, i) => {
       li.classList.toggle("active", i === idx);
@@ -129,17 +125,15 @@
     audioEl.src = t.url;
     audioEl.currentTime = 0;
 
-    // When metadata loads, capture duration + play optionally
     audioEl.onloadedmetadata = () => {
       t.duration = audioEl.duration || 0;
       renderTrackList();
-      seekEl.max = 1; // normalized; value handled manually
+      seekEl.max = 1;
       updateTimeUI();
       if (autoplay) play();
     };
   }
 
-  // Transport
   async function play() {
     ensureAudio();
     try {
@@ -166,7 +160,6 @@
   });
 
   audioEl.addEventListener("ended", () => {
-    // Next track if available
     const next = STATE.current + 1;
     if (next < STATE.tracks.length) {
       loadTrack(next, true);
@@ -178,7 +171,6 @@
 
   volEl.addEventListener("input", () => {
     ensureAudio();
-    // connect chain already created; find the gain node by rebuilding is complex—simpler: set element volume
     audioEl.volume = parseFloat(volEl.value);
   });
 
@@ -198,7 +190,6 @@
     if (dur > 0) seekEl.value = (cur / dur).toFixed(3);
   }
 
-  // Drag & drop
   ["dragenter", "dragover"].forEach(evt =>
     dropzone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.add("drag"); })
   );
@@ -206,27 +197,26 @@
     dropzone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); dropzone.classList.remove("drag"); })
   );
   dropzone.addEventListener("drop", (e) => {
-    const dt = e.dataTransfer;
-    if (dt?.items && dt.items[0] && "getAsFileSystemHandle" in dt.items[0]) {
-      // Some browsers provide handles; we still just read files
-    }
     addFiles(e.dataTransfer.files);
   });
 
-  // Add button
   addBtn.addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", (e) => addFiles(e.target.files));
 
-  // Cinema
   cinemaBtn.addEventListener("click", () => {
     document.body.classList.toggle("cinema");
     setTimeout(fitCanvas, 50);
   });
 
-  // Quality
+  exitCinemaBtn.addEventListener("click", () => {
+    if (document.body.classList.contains("cinema")) {
+      document.body.classList.remove("cinema");
+      setTimeout(fitCanvas, 50);
+    }
+  });
+
   qualitySel.addEventListener("change", () => {
     STATE.quality = qualitySel.value;
-    // adjust visual complexity
     if (STATE.quality === "high") {
       STATE.bars = 64;
       STATE.peakDecay = 0.012;
@@ -237,13 +227,10 @@
       STATE.bars = 32;
       STATE.peakDecay = 0.02;
     }
-    // reset peaks length
     STATE.peakHold = new Array(STATE.bars).fill(0);
   });
 
-  // Visual math helpers
   function makeLogBandMap(nFftBins, nBars, sampleRate = 44100) {
-    // Map frequency bins (~nFftBins) to nBars, logarithmically from ~32Hz to ~16kHz
     const nyquist = sampleRate / 2;
     const fMin = 32, fMax = Math.min(16000, nyquist);
     const binsPerBar = [];
@@ -258,7 +245,6 @@
     return binsPerBar;
   }
 
-  // Drawing
   let bandMap = null;
   function loop() {
     STATE.rafId = requestAnimationFrame(loop);
@@ -271,17 +257,14 @@
   function drawFrame(freq, wave) {
     const W = canvas.clientWidth, H = canvas.clientHeight;
 
-    // lazy band map init or if bars changed
     if (!bandMap || bandMap.length !== STATE.bars) {
       bandMap = makeLogBandMap(freq.length, STATE.bars, audioCtx?.sampleRate || 44100);
       STATE.peakHold = new Array(STATE.bars).fill(0);
     }
 
-    // clear bg with subtle vignette
     ctx2d.fillStyle = "#07090c";
     ctx2d.fillRect(0, 0, W, H);
 
-    // gradient for bars
     const grad = ctx2d.createLinearGradient(0, 0, 0, H);
     grad.addColorStop(0.0, "#b8d9ff");
     grad.addColorStop(0.5, "#6ad1ff");
@@ -293,19 +276,16 @@
     const gap = 3;
     const barW = (W - margin * 2 - gap * (STATE.bars - 1)) / STATE.bars;
 
-    // compute per-bar energy (0..1)
     const bars = new Array(STATE.bars).fill(0);
     for (let i = 0; i < STATE.bars; i++) {
       const [b0, b1] = bandMap[i];
       let sum = 0;
       for (let b = b0; b < b1; b++) sum += freq[b];
-      const avg = sum / (b1 - b0); // 0..255
-      // emphasize lows slightly, compress highs
+      const avg = sum / (b1 - b0);
       const tilt = Math.pow(i / STATE.bars, 0.7) * 0.15;
       bars[i] = Math.min(1, Math.max(0, (avg / 255) * (1 - tilt)));
     }
 
-    // smooth peaks and draw bars
     ctx2d.save();
     ctx2d.translate(margin, visY + visH);
     ctx2d.fillStyle = grad;
@@ -313,20 +293,15 @@
     for (let i = 0; i < STATE.bars; i++) {
       const x = i * (barW + gap);
       const h = Math.max(2, bars[i] * visH);
-      // peak hold
       STATE.peakHold[i] = Math.max(STATE.peakHold[i] - STATE.peakDecay * visH, h);
-      // bar
       ctx2d.fillRect(x, -h, barW, h);
-      // bar border subtle
       ctx2d.strokeRect(x + 0.5, -h + 0.5, barW - 1, h - 1);
-      // peak line (glow)
       ctx2d.fillStyle = "rgba(255,255,255,0.6)";
       ctx2d.fillRect(x, -STATE.peakHold[i] - 2, barW, 2);
       ctx2d.fillStyle = grad;
     }
     ctx2d.restore();
 
-    // waveform overlay with glow
     const waveH = Math.min(H * 0.22, 140);
     const waveY = H - waveH - 18;
     ctx2d.save();
@@ -337,14 +312,13 @@
     ctx2d.beginPath();
     const step = Math.max(1, Math.floor(wave.length / W));
     for (let x = 0, i = 0; i < wave.length; i += step, x++) {
-      const v = (wave[i] - 128) / 128; // -1..1
+      const v = (wave[i] - 128) / 128;
       const y = v * (waveH * 0.48);
       if (x === 0) ctx2d.moveTo(x, y);
       else ctx2d.lineTo(x, y);
     }
     ctx2d.stroke();
 
-    // glow pass
     ctx2d.globalAlpha = 0.35;
     ctx2d.lineWidth = 8;
     ctx2d.strokeStyle = "#6ad1ff";
@@ -352,7 +326,6 @@
     ctx2d.globalAlpha = 1;
     ctx2d.restore();
 
-    // subtle vignette
     const vignette = ctx2d.createRadialGradient(W/2, H/2, Math.min(W,H)*0.2, W/2, H/2, Math.max(W,H)*0.7);
     vignette.addColorStop(0, "rgba(0,0,0,0)");
     vignette.addColorStop(1, "rgba(0,0,0,0.35)");
@@ -360,13 +333,11 @@
     ctx2d.fillRect(0,0,W,H);
   }
 
-  // Init
   window.addEventListener("load", () => {
     fitCanvas();
-    // iOS requires user gesture to start AudioContext; we create it on first play
+    window.addEventListener("resize", fitCanvas);
   });
 
-  // Space toggles play
   window.addEventListener("keydown", (e) => {
     if (e.code === "Space") { e.preventDefault(); STATE.playing ? pause() : play(); }
     if (e.code === "ArrowRight") { audioEl.currentTime = Math.min((audioEl.currentTime||0)+5, audioEl.duration||1e9); }
