@@ -10,12 +10,14 @@
 }
 
 *{ box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; margin: 0; }
 body{
-  margin: 0;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
   color: var(--fg);
   background: radial-gradient(1200px 800px at 70% 20%, #0f1520 0%, #0b0d10 60%);
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
 }
 
 .app-header{
@@ -39,7 +41,11 @@ h1 .dot{ color: var(--accent); margin: 0 6px; }
   background:#0f1420; color:var(--fg); border:1px solid #2a3446; border-radius:8px; padding:6px 8px;
 }
 
-.app-main{ display: grid; grid-template-columns: 280px 1fr; height: calc(100dvh - 68px); }
+.app-main{
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 0;
+}
 .sidebar{
   border-right: 1px solid #1e2430; background: linear-gradient(180deg, #0e1218, #0b0d10);
   overflow: hidden; display:flex; flex-direction: column;
@@ -63,10 +69,7 @@ h1 .dot{ color: var(--accent); margin: 0 6px; }
 .track-list .sub{ font-size: 12px; color: var(--muted); }
 
 .stage{ position: relative; background: #07090c; }
-#vis{
-  width: 100%; height: 100%;
-  display: block;
-}
+#vis{ width: 100%; height: 100%; display: block; }
 
 .transport{
   position: absolute; left: 12px; right: 12px; bottom: 12px;
@@ -82,15 +85,16 @@ h1 .dot{ color: var(--accent); margin: 0 6px; }
   background: var(--bg2);
 }
 
-/* Fullscreen / cinema */
 body.cinema .sidebar, body.cinema .app-footer, body.cinema .app-header{ display:none; }
-body.cinema .app-main{ grid-template-columns: 1fr; height: 100dvh; }
+body.cinema .app-main{ grid-template-columns: 1fr; }
 body.cinema .transport{ left: 50%; transform: translateX(-50%); width: min(720px, 92vw); }
 
-/* Mobile */
 @media (max-width: 900px){
   .app-main{ grid-template-columns: 1fr; }
-  .sidebar{ height: 40dvh; }
-  .stage{ height: 60dvh; }
+  .sidebar{ height: 40dvh; min-height: 180px; }
+  .stage{ height: 60dvh; min-height: 300px; }
   .transport input[type="range"]{ width: 34%; }
 }
+
+#btn-exit-cinema{ display: none; margin-left: auto; }
+body.cinema #btn-exit-cinema{ display: inline-block; }
