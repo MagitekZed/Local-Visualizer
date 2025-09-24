@@ -115,9 +115,9 @@ class SimplexNoise {
 }
 
 const QUALITY_PRESETS = {
-  high: { particles: 18000, ribbons: 4, ribbonSegments: 150, bloom: 1.25 },
-  medium: { particles: 13500, ribbons: 3, ribbonSegments: 120, bloom: 1.0 },
-  low: { particles: 9000, ribbons: 3, ribbonSegments: 90, bloom: 0.75 }
+  high: { particles: 19000, ribbons: 4, ribbonSegments: 170, bloom: 1.0 },
+  medium: { particles: 11500, ribbons: 3, ribbonSegments: 130, bloom: 0.8 },
+  low: { particles: 5500, ribbons: 2, ribbonSegments: 90, bloom: 0.6 }
 };
 
 const BASE_GRADIENT = [
@@ -427,6 +427,7 @@ class AuroraOrbitVisualizer {
     this.quality = 'high';
     this.qualitySettings = QUALITY_PRESETS.high;
     this.bandMap = null;
+    this.bandLevels = new Float32Array(48);
     this.audioState = {
       energy: 0,
       bass: 0,
@@ -566,7 +567,7 @@ class AuroraOrbitVisualizer {
       uBass: { value: 0 },
       uMids: { value: 0 },
       uHighs: { value: 0 },
-      uHueShift: { value: 0 },
+      uHue: { value: 0 },
       uSize: { value: 16.0 },
       uBloomBoost: { value: 0 },
       uMinorRadius: { value: this.minorRadius },
@@ -585,8 +586,10 @@ class AuroraOrbitVisualizer {
       uniform float uBass;
       uniform float uMids;
       uniform float uHighs;
+      uniform float uHue;
       uniform float uSize;
       uniform float uMinorRadius;
+      uniform float uSparkle;
       varying float vSpark;
       varying float vGrad;
       varying float vDepth;
@@ -625,14 +628,14 @@ class AuroraOrbitVisualizer {
 
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
         float dist = -mvPosition.z;
-        float size = uSize * (1.0 + 0.6 * uBass) * (1.0 + 0.3 * sin(theta * 4.0 + uTime + aSeed.x * 12.0));
+        float size = uSize * (1.0 + 0.6 * uBass) * (1.0 + 0.3 * sin(theta * 4.0 + uTime + aSeed.x * 12.0)) * (1.0 + uEnergy * 0.4);
         gl_PointSize = size * (300.0 / max(dist, 40.0));
         vDepth = clamp(1.0 - dist / 18.0, 0.0, 1.0);
 
         float sparkleSeed = hash12(aSeed + uTime * 0.015);
-        float sparkleGate = step(0.82, sparkleSeed + uHighs * 0.25);
+        float sparkleGate = step(0.78, sparkleSeed + uSparkle * 0.85);
         vSpark = sparkleGate * (0.25 + 1.4 * uHighs);
-        vGrad = clamp(0.3 + 0.6 * sin(phi + uTime * 0.35) + 0.2 * aSeed.x, 0.0, 1.0);
+        vGrad = clamp(0.3 + 0.6 * sin(phi + uTime * 0.35 + uHue) + 0.2 * aSeed.x, 0.0, 1.0);
 
         gl_Position = projectionMatrix * mvPosition;
       }
@@ -642,6 +645,7 @@ class AuroraOrbitVisualizer {
       precision mediump float;
       uniform vec3 uGradient[4];
       uniform float uBloomBoost;
+      uniform float uEnergy;
       varying float vSpark;
       varying float vGrad;
       varying float vDepth;
@@ -661,7 +665,8 @@ class AuroraOrbitVisualizer {
         vec3 color = gradient(vGrad) * (0.55 + falloff * 0.6);
         color += vec3(0.9, 0.85, 1.2) * vSpark * falloff;
         color *= 1.0 + uBloomBoost * (0.4 + vDepth * 0.6);
-        float alpha = falloff * (0.45 + 0.55 * vDepth);
+        color *= 0.9 + uEnergy * 0.6;
+        float alpha = falloff * (0.4 + 0.5 * vDepth + uEnergy * 0.15);
         gl_FragColor = vec4(color, alpha);
       }
     `;
@@ -727,9 +732,6 @@ class AuroraOrbitVisualizer {
     let bassSum = 0, bassCount = 0;
     let midsSum = 0, midsCount = 0;
     let highsSum = 0, highsCount = 0;
-    let energySum = 0;
-
-    for (let i = 0; i < freq.length; i++) energySum += freq[i];
 
     const nyquist = this.sampleRate / 2;
     const binHz = nyquist / freq.length;
@@ -753,13 +755,28 @@ class AuroraOrbitVisualizer {
     rms = Math.sqrt(rms / wave.length);
 
     const lerp = (a, b, t) => a + (b - a) * t;
+    const smooth = 0.2;
 
-    const energy = energySum / (freq.length * 255);
-    this.audioState.energy = lerp(this.audioState.energy, Math.min(1, (energy + rms) * 0.7), 0.08);
-    this.audioState.bass = lerp(this.audioState.bass, bassCount ? bassSum / bassCount : 0, 0.12);
-    this.audioState.mids = lerp(this.audioState.mids, midsCount ? midsSum / midsCount : 0, 0.1);
-    this.audioState.highs = lerp(this.audioState.highs, highsCount ? highsSum / highsCount : 0, 0.1);
-    this.audioState.sparkle = lerp(this.audioState.sparkle, Math.pow(this.audioState.highs, 1.3), 0.18);
+    const energy = Math.min(1, rms);
+    this.audioState.energy = lerp(this.audioState.energy, energy, smooth);
+    this.audioState.bass = lerp(this.audioState.bass, bassCount ? bassSum / bassCount : 0, smooth);
+    this.audioState.mids = lerp(this.audioState.mids, midsCount ? midsSum / midsCount : 0, smooth);
+    this.audioState.highs = lerp(this.audioState.highs, highsCount ? highsSum / highsCount : 0, smooth);
+    this.audioState.sparkle = lerp(this.audioState.sparkle, Math.pow(this.audioState.highs, 1.2), 0.22);
+
+    const levels = this.bandLevels;
+    if (levels.length !== this.bandMap.length) {
+      this.bandLevels = new Float32Array(this.bandMap.length);
+    }
+    const bandLevels = this.bandLevels;
+    for (let i = 0; i < this.bandMap.length; i++) {
+      const [b0, b1] = this.bandMap[i];
+      let sum = 0;
+      for (let b = b0; b < b1; b++) sum += freq[b];
+      const avg = sum / Math.max(1, b1 - b0);
+      const target = Math.pow(avg / 255, 0.9);
+      bandLevels[i] = lerp(bandLevels[i] || 0, target, 0.2);
+    }
   }
 
   update(freq, wave, dt) {
@@ -779,7 +796,7 @@ class AuroraOrbitVisualizer {
     uniforms.uBass.value = audio.bass;
     uniforms.uMids.value = audio.mids;
     uniforms.uHighs.value = audio.highs;
-    uniforms.uHueShift.value = hueShift;
+    uniforms.uHue.value = hueShift;
     uniforms.uSparkle.value = audio.sparkle;
 
     const baseMinor = 0.62 * (1.0 + audio.bass * 0.12);

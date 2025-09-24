@@ -18,7 +18,7 @@ class AuroraOrbit2DVisualizer {
       highs: 0
     };
     this.quality = 'high';
-    this.settings = { bars: 96, glow: 26, sparkCount: 180 };
+    this.settings = { bars: 48, glow: 26, sparkCount: 180 };
     this.bgGradient = null;
     this.radialGradient = null;
     this.lastHue = Math.random();
@@ -29,15 +29,15 @@ class AuroraOrbit2DVisualizer {
 
   setQuality(level) {
     const presets = {
-      high: { bars: 96, glow: 28, sparkCount: 220 },
-      medium: { bars: 72, glow: 22, sparkCount: 160 },
-      low: { bars: 56, glow: 18, sparkCount: 120 }
+      high: { bars: 48, glow: 28, sparkCount: 220 },
+      medium: { bars: 48, glow: 22, sparkCount: 160 },
+      low: { bars: 40, glow: 18, sparkCount: 110 }
     };
     if (!presets[level]) return;
     this.quality = level;
     this.settings = presets[level];
-    this.barValues = new Float32Array(Math.max(this.settings.bars, this.barValues.length));
-    this.sparkSeeds = new Float32Array(Math.max(this.settings.sparkCount, this.sparkSeeds.length));
+    this.barValues = new Float32Array(this.settings.bars);
+    this.sparkSeeds = new Float32Array(this.settings.sparkCount);
     for (let i = 0; i < this.sparkSeeds.length; i++) {
       this.sparkSeeds[i] = Math.random();
     }
@@ -118,7 +118,6 @@ class AuroraOrbit2DVisualizer {
     }
 
     const lerp = (a, b, t) => a + (b - a) * t;
-    let energySum = 0;
     const nyquist = this.sampleRate / 2;
     const binHz = nyquist / freq.length;
     let bassSum = 0, bassCount = 0;
@@ -127,7 +126,6 @@ class AuroraOrbit2DVisualizer {
 
     for (let i = 0; i < freq.length; i++) {
       const v = freq[i] / 255;
-      energySum += v;
       const hz = i * binHz;
       if (hz <= 200) { bassSum += v; bassCount++; }
       else if (hz <= 2000) { midsSum += v; midsCount++; }
@@ -141,11 +139,12 @@ class AuroraOrbit2DVisualizer {
     }
     rms = Math.sqrt(rms / wave.length);
 
-    const energy = energySum / freq.length;
-    this.audioState.energy = lerp(this.audioState.energy, Math.min(1, (energy + rms) * 0.6), 0.12);
-    this.audioState.bass = lerp(this.audioState.bass, bassCount ? bassSum / bassCount : 0, 0.15);
-    this.audioState.mids = lerp(this.audioState.mids, midsCount ? midsSum / midsCount : 0, 0.14);
-    this.audioState.highs = lerp(this.audioState.highs, highsCount ? highsSum / highsCount : 0, 0.2);
+    const smooth = 0.2;
+    const energy = Math.min(1, rms);
+    this.audioState.energy = lerp(this.audioState.energy, energy, smooth);
+    this.audioState.bass = lerp(this.audioState.bass, bassCount ? bassSum / bassCount : 0, smooth);
+    this.audioState.mids = lerp(this.audioState.mids, midsCount ? midsSum / midsCount : 0, smooth);
+    this.audioState.highs = lerp(this.audioState.highs, highsCount ? highsSum / highsCount : 0, smooth);
 
     const bars = this.settings.bars;
     for (let i = 0; i < bars; i++) {
