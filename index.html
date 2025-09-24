@@ -1,42 +1,57 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Local Visualizer</title>
-    <!-- Link to our base styles. These styles lay out the page and
-         establish a dark background with light text. -->
-    <link rel="stylesheet" href="css/styles.css" />
-  </head>
-  <body>
-    <header>
-      <h1>Local Visualizer</h1>
-    </header>
-    <main>
-      <!-- File picker: allow users to choose one or more audio files.  -->
-      <div class="picker">
-        <label for="file-input">Select audio files:</label>
-        <input id="file-input" type="file" accept="audio/*" multiple />
-      </div>
-
-      <!-- Controls: choose visualizer preset and play/pause the current track.  -->
-      <div class="controls">
-        <label for="visualizer-select">Visualizer:</label>
-        <select id="visualizer-select">
-          <option value="bars" selected>Bars</option>
-          <option value="circle">Circle</option>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Local Jukebox + Visualizer</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Local Jukebox<span class="dot">•</span>Visualizer</h1>
+    <div class="controls">
+      <button id="btn-add" class="btn">Add Songs</button>
+      <input id="fileInput" type="file" accept="audio/*" multiple hidden />
+      <button id="btn-cinema" class="btn">Cinema Mode</button>
+      <label class="select-wrap">
+        <span>Quality</span>
+        <select id="quality">
+          <option value="high" selected>High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
         </select>
-        <button id="play-btn" disabled>Play</button>
-        <button id="pause-btn" disabled>Pause</button>
+      </label>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <aside class="sidebar" id="library">
+      <div class="dropzone" id="dropzone">
+        <p>Drag & drop audio files here<br><small>…or click “Add Songs”</small></p>
       </div>
+      <ul id="trackList" class="track-list"></ul>
+    </aside>
 
-      <!-- Canvas element where our visuals will be rendered.  -->
-      <canvas id="visualizer-canvas" width="800" height="300"></canvas>
-    </main>
+    <section class="stage">
+      <canvas id="vis"></canvas>
 
-    <!-- Application bootstrap script. This script pulls in the core
-         functionality, sets up the audio graph, and manages the user
-         interface interactions. -->
-    <script type="module" src="js/app.js"></script>
-  </body>
+      <div class="transport" id="transport">
+        <button id="playPause" class="btn big">Play</button>
+        <input id="seek" type="range" min="0" max="1" step="0.001" value="0" />
+        <span id="time">0:00 / 0:00</span>
+        <label class="vol">
+          <span>Vol</span>
+          <input id="volume" type="range" min="0" max="1" step="0.01" value="0.9" />
+        </label>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <small>All processing happens locally in your browser. Nothing is uploaded.</small>
+  </footer>
+
+  <audio id="audio" crossorigin="anonymous"></audio>
+  <script src="app.js"></script>
+</body>
 </html>
