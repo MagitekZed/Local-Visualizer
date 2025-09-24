@@ -1,23 +1,23 @@
-/* app.js */
+/* app.js (cinema fit fix + Esc exit) */
 (() => {
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
   // Elements
-  const audioEl = $("#audio");
-  const canvas = $("#vis");
+  const audioEl = document.querySelector("#audio");
+  const canvas = document.querySelector("#vis");
   const ctx2d = canvas.getContext("2d", { alpha: false, desynchronized: true });
-  const playPauseBtn = $("#playPause");
-  const addBtn = $("#btn-add");
-  const fileInput = $("#fileInput");
-  const trackListEl = $("#trackList");
-  const dropzone = $("#dropzone");
-  const timeEl = $("#time");
-  const seekEl = $("#seek");
-  const volEl = $("#volume");
-  const cinemaBtn = $("#btn-cinema");
-  const exitCinemaBtn = $("#btn-exit-cinema");
-  const qualitySel = $("#quality");
+  const playPauseBtn = document.querySelector("#playPause");
+  const addBtn = document.querySelector("#btn-add");
+  const fileInput = document.querySelector("#fileInput");
+  const trackListEl = document.querySelector("#trackList");
+  const dropzone = document.querySelector("#dropzone");
+  const timeEl = document.querySelector("#time");
+  const seekEl = document.querySelector("#seek");
+  const volEl = document.querySelector("#volume");
+  const cinemaBtn = document.querySelector("#btn-cinema");
+  const exitCinemaBtn = document.querySelector("#btn-exit-cinema");
+  const qualitySel = document.querySelector("#quality");
 
   // Resize canvas
   function fitCanvas() {
@@ -117,7 +117,7 @@
   function loadTrack(idx, autoplay=false) {
     if (idx < 0 || idx >= STATE.tracks.length) return;
     STATE.current = idx;
-    $$(".track-list li").forEach((li, i) => {
+    Array.from(document.querySelectorAll(".track-list li")).forEach((li, i) => {
       li.classList.toggle("active", i === idx);
     });
 
@@ -203,11 +203,16 @@
   addBtn.addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", (e) => addFiles(e.target.files));
 
+  // Enter/exit cinema: force viewport to top to avoid any residual scroll
   cinemaBtn.addEventListener("click", () => {
     document.body.classList.toggle("cinema");
+    if (document.body.classList.contains("cinema")) {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    }
     setTimeout(fitCanvas, 50);
   });
 
+  // Exit button only shows in cinema
   exitCinemaBtn.addEventListener("click", () => {
     if (document.body.classList.contains("cinema")) {
       document.body.classList.remove("cinema");
@@ -342,5 +347,9 @@
     if (e.code === "Space") { e.preventDefault(); STATE.playing ? pause() : play(); }
     if (e.code === "ArrowRight") { audioEl.currentTime = Math.min((audioEl.currentTime||0)+5, audioEl.duration||1e9); }
     if (e.code === "ArrowLeft") { audioEl.currentTime = Math.max((audioEl.currentTime||0)-5, 0); }
+    if (e.code === "Escape" && document.body.classList.contains("cinema")) {
+      document.body.classList.remove("cinema");
+      setTimeout(fitCanvas, 50);
+    }
   });
 })();
