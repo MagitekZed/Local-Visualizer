@@ -336,21 +336,28 @@ function makeStarfield(count, radius) {
  * torus.  Their thickness and amplitude are driven by audio mids.
  */
 function buildRibbonGeometry(samples, segments) {
+  // Each ribbon segment consists of three vertices: two at the start of the
+  // segment (t0,0) and (t0,1), and one at the next sample (t1,0).  This
+  // arrangement mirrors the structure of Line2 geometry, where vertices
+  // are duplicated to properly convey width and orientation.  Accordingly,
+  // we allocate 6 floats for positions (3 vertices × 2 components) and
+  // 9 floats for colours (3 vertices × 3 components) per segment.
   const positions = new Float32Array(segments * 6);
-  const colors = new Float32Array(segments * 6);
+  const colors = new Float32Array(segments * 9);
   for (let i = 0; i < segments; i++) {
-    // Two vertices per segment (start and end).  The shader uses
-    // these to orient and colour the ribbon.  Colour is assigned
-    // using the same gradient as the particles but offset by a
-    // per‑ribbon phase.
     const t0 = i / segments;
     const t1 = (i + 1) / segments;
+    // Populate position attributes: (t0,0), (t0,1), (t1,0)
     positions.set([t0, 0, t0, 1, t1, 0], i * 6);
+    // Determine colour indices in the gradient palette
     const c0 = i % GRADIENT_STOPS.length;
     const c1 = (i + 1) % GRADIENT_STOPS.length;
     const color0 = gradientUniforms.slice(c0 * 3, c0 * 3 + 3);
     const color1 = gradientUniforms.slice(c1 * 3, c1 * 3 + 3);
-    colors.set([...color0, ...color0, ...color1, ...color1], i * 6);
+    // Assign colours for the three vertices: the two start vertices share
+    // color0, and the end vertex uses color1.  This produces a smooth
+    // colour gradient along the ribbon.
+    colors.set([...color0, ...color0, ...color1], i * 9);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 2));
