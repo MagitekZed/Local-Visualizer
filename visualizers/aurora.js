@@ -14,16 +14,35 @@ async function loadModule(options) {
 
 const moduleBase = new URL('.', import.meta.url);
 const vendorConfig = (GLOBAL && GLOBAL.AURORA_VENDOR_MODULES) || {};
+const documentBase =
+  (GLOBAL && GLOBAL.document && GLOBAL.document.baseURI) ||
+  (GLOBAL && GLOBAL.location && GLOBAL.location.href) ||
+  moduleBase;
+
+const resolveVendorModule = (specifier) => {
+  if (!specifier) return null;
+  try {
+    return new URL(specifier, documentBase).href;
+  } catch (err) {
+    console.warn(`Failed to resolve vendor module ${specifier}:`, err);
+  }
+  try {
+    return new URL(specifier, moduleBase).href;
+  } catch (err) {
+    console.warn(`Failed to resolve module-relative specifier ${specifier}:`, err);
+  }
+  return null;
+};
 
 const threeModule = await loadModule([
-  vendorConfig.three ? new URL(vendorConfig.three, moduleBase).href : null,
+  resolveVendorModule(vendorConfig.three),
   new URL('../modules/three.module.js', moduleBase).href,
   'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js'
 ]);
 const THREE = threeModule;
 
 const postModule = await loadModule([
-  vendorConfig.postprocessing ? new URL(vendorConfig.postprocessing, moduleBase).href : null,
+  resolveVendorModule(vendorConfig.postprocessing),
   new URL('../modules/postprocessing.js', moduleBase).href,
   'https://cdn.jsdelivr.net/npm/postprocessing@6.35.3/build/postprocessing.esm.js'
 ]);
