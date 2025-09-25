@@ -12,7 +12,7 @@
        aurora.js imports "three" or "postprocessing" it resolves to
        these URLs via the AURORA_VENDOR_MODULES map defined below. -->
   <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/build/three.module.js" />
-  <link rel="modulepreload" href="https://unpkg.com/postprocessing@6.35.3/build/postprocessing.js" />
+  <link rel="modulepreload" href="https://unpkg.com/postprocessing@6.35.3?module" />
   <script>
     // Expose a map of vendor module names to absolute URLs.  Our visualiser
     // consults this object to resolve the import paths for Three.js and
@@ -20,7 +20,7 @@
     // copies in the repository.
     window.AURORA_VENDOR_MODULES = {
       three: 'https://unpkg.com/three@0.160.0/build/three.module.js',
-      postprocessing: 'https://unpkg.com/postprocessing@6.35.3/build/postprocessing.js'
+      postprocessing: 'https://unpkg.com/postprocessing@6.35.3?module'
     };
   </script>
 </head>
