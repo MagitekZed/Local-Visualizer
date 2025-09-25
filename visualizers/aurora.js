@@ -3,13 +3,19 @@
 // installing local modules.  If you wish to host the modules
 // yourself, update these URLs accordingly.
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-import {
+// Import the entire postprocessing module and then destructure the needed
+// classes.  The `?module` suffix ensures we load the ES module build of
+// postprocessing, which provides named exports.  Importing the
+// namespace rather than individual named exports ensures compatibility if
+// the bundler changes the export structure in future versions.
+import * as POSTPROCESSING from 'https://unpkg.com/postprocessing@6.35.3?module';
+const {
   EffectComposer,
   RenderPass,
   EffectPass,
   FXAAEffect,
   BloomEffect
-} from 'https://unpkg.com/postprocessing@6.35.3/build/postprocessing.js';
+} = POSTPROCESSING;
 
 /*!
  * Aurora Orbit Visualiser
