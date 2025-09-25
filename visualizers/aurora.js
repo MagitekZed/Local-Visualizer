@@ -1,9 +1,11 @@
-const THREE = window.THREE;
-const POSTPROCESSING = window.POSTPROCESSING;
-
-if (!THREE) {
-  throw new Error("Three.js is required for AuroraOrbitVisualizer");
-}
+import * as THREE from '../modules/three.module.js';
+import {
+  EffectComposer,
+  RenderPass,
+  EffectPass,
+  FXAAEffect,
+  BloomEffect
+} from '../modules/postprocessing.js';
 
 // Lightweight seeded simplex noise for smooth procedural motion.
 class SimplexNoise {
@@ -516,18 +518,18 @@ class AuroraOrbitVisualizer {
   }
 
   _setupPost() {
-    if (!POSTPROCESSING) return;
-    const composer = new POSTPROCESSING.EffectComposer(this.renderer);
-    const renderPass = new POSTPROCESSING.RenderPass(this.scene, this.camera);
-    const fxaa = new POSTPROCESSING.FXAAEffect();
-    const bloom = new POSTPROCESSING.BloomEffect({
+    if (!this.renderer || !this.camera) return;
+    const composer = new EffectComposer(this.renderer);
+    const renderPass = new RenderPass(this.scene, this.camera);
+    const fxaa = new FXAAEffect();
+    const bloom = new BloomEffect({
       intensity: this.qualitySettings.bloom,
       luminanceThreshold: 0.36,
       luminanceSmoothing: 0.18,
       radius: 0.85
     });
     bloom.blendMode.opacity.value = 1.0;
-    const effectPass = new POSTPROCESSING.EffectPass(this.camera, fxaa, bloom);
+    const effectPass = new EffectPass(this.camera, fxaa, bloom);
     effectPass.renderToScreen = true;
     composer.addPass(renderPass);
     composer.addPass(effectPass);
@@ -718,8 +720,20 @@ class AuroraOrbitVisualizer {
     if (this.composer) {
       this.composer.setSize(width, height);
       if (this.fxaaEffect) {
-        const resolution = this.fxaaEffect.resolution;
-        resolution.setResolution(width * this.pixelRatio, height * this.pixelRatio);
+        const targetWidth = width * this.pixelRatio;
+        const targetHeight = height * this.pixelRatio;
+        if (typeof this.fxaaEffect.setSize === 'function') {
+          this.fxaaEffect.setSize(targetWidth, targetHeight);
+        } else if (this.fxaaEffect.resolution) {
+          const resolution = this.fxaaEffect.resolution;
+          if (typeof resolution.set === 'function') {
+            resolution.set(targetWidth, targetHeight);
+          } else if (typeof resolution.setSize === 'function') {
+            resolution.setSize(targetWidth, targetHeight);
+          } else if (typeof resolution.setResolution === 'function') {
+            resolution.setResolution(targetWidth, targetHeight);
+          }
+        }
       }
     }
   }
