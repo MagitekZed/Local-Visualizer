@@ -106,9 +106,9 @@ class VisualizerManager {
   }
 
   update(freq, wave, dt) {
-    if (this.impl && typeof this.impl.update === 'function') {
-      this.impl.update(freq, wave, dt);
-    }
+    if (!this.impl || typeof this.impl.update !== 'function') return;
+    if (this.activeType === 'webgl' && !this.impl.renderer) return;
+    this.impl.update(freq, wave, dt);
   }
 
   setQuality(level) {
@@ -300,6 +300,9 @@ class VisualizerManager {
     analyser.getByteTimeDomainData(timeData);
     const dt = Math.min(0.12, Math.max(0.001, (now - STATE.lastFrameTime) / 1000 || 0.016));
     STATE.lastFrameTime = now;
+    const impl = visualizerManager.impl;
+    if (!impl) return;
+    if (visualizerManager.activeType === 'webgl' && !impl.renderer) return;
     visualizerManager.update(freqData, timeData, dt);
   }
 

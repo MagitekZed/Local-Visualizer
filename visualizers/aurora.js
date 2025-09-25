@@ -1,58 +1,28 @@
+import * as THREE from '../modules/three.module.js';
+import { EffectComposer, RenderPass, EffectPass, FXAAEffect, BloomEffect } from '../modules/postprocessing.js';
+
 const GLOBAL = typeof window !== 'undefined' ? window : undefined;
+const DEBUG = !!(
+  GLOBAL &&
+  ((GLOBAL.localStorage && GLOBAL.localStorage.getItem('aurora-debug') === '1') ||
+    (GLOBAL.location && /auroraDebug=1/i.test(GLOBAL.location.search || '')))
+);
 
-async function loadModule(options) {
-  for (const src of options) {
-    if (!src) continue;
-    try {
-      return await import(src);
-    } catch (err) {
-      console.warn(`Failed loading module ${src}:`, err);
-    }
+const debugLog = (...args) => {
+  if (DEBUG && typeof console !== 'undefined' && console.log) {
+    console.log('[AuroraOrbit]', ...args);
   }
-  throw new Error('Unable to load requested module');
-}
-
-const moduleBase = new URL('.', import.meta.url);
-const vendorConfig = (GLOBAL && GLOBAL.AURORA_VENDOR_MODULES) || {};
-const documentBase =
-  (GLOBAL && GLOBAL.document && GLOBAL.document.baseURI) ||
-  (GLOBAL && GLOBAL.location && GLOBAL.location.href) ||
-  moduleBase;
-
-const resolveVendorModule = (specifier) => {
-  if (!specifier) return null;
-  try {
-    return new URL(specifier, documentBase).href;
-  } catch (err) {
-    console.warn(`Failed to resolve vendor module ${specifier}:`, err);
-  }
-  try {
-    return new URL(specifier, moduleBase).href;
-  } catch (err) {
-    console.warn(`Failed to resolve module-relative specifier ${specifier}:`, err);
-  }
-  return null;
 };
 
-const threeModule = await loadModule([
-  resolveVendorModule(vendorConfig.three),
-  new URL('../modules/three.module.js', moduleBase).href,
-  'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js'
-]);
-const THREE = threeModule;
+if (!THREE || !THREE.WebGLRenderer) {
+  console.error('AuroraOrbitVisualizer: failed to load three.module.js');
+  throw new Error('Three.js module missing');
+}
 
-const postModule = await loadModule([
-  resolveVendorModule(vendorConfig.postprocessing),
-  new URL('../modules/postprocessing.js', moduleBase).href,
-  'https://cdn.jsdelivr.net/npm/postprocessing@6.35.3/build/postprocessing.esm.js'
-]);
-const {
-  EffectComposer,
-  RenderPass,
-  EffectPass,
-  FXAAEffect,
-  BloomEffect
-} = postModule;
+if (!EffectComposer || !RenderPass || !EffectPass) {
+  console.error('AuroraOrbitVisualizer: failed to load postprocessing module');
+  throw new Error('postprocessing module missing');
+}
 
 if (THREE.ColorManagement && THREE.ColorManagement.enabled !== undefined) {
   THREE.ColorManagement.enabled = true;
@@ -168,9 +138,9 @@ class SimplexNoise {
 }
 
 const QUALITY_PRESETS = {
-  high: { particles: 20000, ribbons: 4, ribbonSegments: 170, bloom: 1.0 },
-  medium: { particles: 12000, ribbons: 3, ribbonSegments: 140, bloom: 0.85 },
-  low: { particles: 6000, ribbons: 2, ribbonSegments: 110, bloom: 0.7 }
+  high: { particles: 12000, ribbons: 3, ribbonSegments: 170, bloom: 0.95 },
+  medium: { particles: 6000, ribbons: 2, ribbonSegments: 140, bloom: 0.85 },
+  low: { particles: 3000, ribbons: 1, ribbonSegments: 110, bloom: 0.72 }
 };
 
 const BASE_GRADIENT = [
@@ -626,56 +596,65 @@ class AuroraOrbitVisualizer {
     this.analyser = analyser;
     this.sampleRate = analyser.context.sampleRate || 44100;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: 'high-performance' });
-    if (!renderer.getContext()) {
-      throw new Error('WebGL renderer not available');
-    }
-    this.renderer = renderer;
-    renderer.setPixelRatio(1);
-    renderer.setClearColor(0x05060a, 1);
-    if (renderer.outputColorSpace !== undefined && THREE.SRGBColorSpace) {
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-    } else if (renderer.outputEncoding !== undefined && THREE.sRGBEncoding !== undefined) {
-      renderer.outputEncoding = THREE.sRGBEncoding;
-    }
-    if (THREE.ACESFilmicToneMapping !== undefined) {
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.05;
-    }
-    renderer.domElement.className = 'aurora-orbit-webgl';
-    renderer.domElement.style.position = 'absolute';
-    renderer.domElement.style.inset = '0';
-    renderer.domElement.style.width = '100%';
-    renderer.domElement.style.height = '100%';
-    renderer.domElement.style.zIndex = '0';
-
-    this.container.insertBefore(renderer.domElement, this.container.firstChild);
-
-    renderer.domElement.addEventListener('webglcontextlost', (e) => {
-      e.preventDefault();
-      if (typeof this.contextLostHandler === 'function') {
-        this.contextLostHandler();
+    try {
+      const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: 'high-performance' });
+      if (!renderer || !renderer.getContext()) {
+        throw new Error('WebGL renderer not available');
       }
-    });
-
-    this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x05060a, 12, 24);
-
-    this.camera = new THREE.PerspectiveCamera(this.baseFov, 1, 0.1, 45);
-    this.camera.position.set(0, 0.5, 4.6);
-
-    this._buildParticles();
-    this._buildRibbons();
-    this._buildStarfield();
-    this._setupPost();
-
-    this.resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        this.resize(width, height);
+      this.renderer = renderer;
+      renderer.setPixelRatio(1);
+      renderer.setClearColor(0x05060a, 1);
+      if (renderer.outputColorSpace !== undefined && THREE.SRGBColorSpace) {
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+      } else if (renderer.outputEncoding !== undefined && THREE.sRGBEncoding !== undefined) {
+        renderer.outputEncoding = THREE.sRGBEncoding;
       }
-    });
-    this.resizeObserver.observe(this.container);
+      if (THREE.ACESFilmicToneMapping !== undefined) {
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.05;
+      }
+      renderer.domElement.className = 'aurora-orbit-webgl';
+      renderer.domElement.style.position = 'absolute';
+      renderer.domElement.style.inset = '0';
+      renderer.domElement.style.width = '100%';
+      renderer.domElement.style.height = '100%';
+      renderer.domElement.style.zIndex = '0';
+
+      this.container.insertBefore(renderer.domElement, this.container.firstChild);
+      debugLog('Renderer created');
+
+      renderer.domElement.addEventListener('webglcontextlost', (e) => {
+        e.preventDefault();
+        if (typeof this.contextLostHandler === 'function') {
+          this.contextLostHandler();
+        }
+      });
+
+      this.scene = new THREE.Scene();
+      this.scene.fog = new THREE.Fog(0x05060a, 12, 24);
+
+      this.camera = new THREE.PerspectiveCamera(this.baseFov, 1, 0.1, 45);
+      this.camera.position.set(0, 0.5, 4.6);
+
+      this._buildParticles();
+      this._buildRibbons();
+      this._buildStarfield();
+      debugLog('Starfield ready');
+      this._setupPost();
+      debugLog('Composer ready');
+
+      this.resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          this.resize(width, height);
+        }
+      });
+      this.resizeObserver.observe(this.container);
+    } catch (err) {
+      console.error('AuroraOrbitVisualizer initialization failed:', err);
+      this.dispose();
+      throw err;
+    }
   }
 
   onContextLost(handler) {
@@ -684,27 +663,32 @@ class AuroraOrbitVisualizer {
 
   _setupPost() {
     if (!this.renderer || !this.camera) return;
-    const composer = new EffectComposer(this.renderer);
-    if ('multisampling' in composer) {
-      composer.multisampling = 0;
+    try {
+      const composer = new EffectComposer(this.renderer);
+      if ('multisampling' in composer) {
+        composer.multisampling = 0;
+      }
+      const renderPass = new RenderPass(this.scene, this.camera);
+      const fxaa = new FXAAEffect();
+      const bloom = new BloomEffect({
+        intensity: this.qualitySettings.bloom,
+        luminanceThreshold: 0.35,
+        luminanceSmoothing: 0.16,
+        radius: 0.85
+      });
+      bloom.blendMode.opacity.value = 1.0;
+      const effectPass = new EffectPass(this.camera, fxaa, bloom);
+      effectPass.renderToScreen = true;
+      composer.addPass(renderPass);
+      composer.addPass(effectPass);
+      this.composer = composer;
+      this.fxaaEffect = fxaa;
+      this.bloomEffect = bloom;
+      this.effectPass = effectPass;
+    } catch (err) {
+      console.error('AuroraOrbitVisualizer post-processing failed:', err);
+      throw err;
     }
-    const renderPass = new RenderPass(this.scene, this.camera);
-    const fxaa = new FXAAEffect();
-    const bloom = new BloomEffect({
-      intensity: this.qualitySettings.bloom,
-      luminanceThreshold: 0.35,
-      luminanceSmoothing: 0.16,
-      radius: 0.85
-    });
-    bloom.blendMode.opacity.value = 1.0;
-    const effectPass = new EffectPass(this.camera, fxaa, bloom);
-    effectPass.renderToScreen = true;
-    composer.addPass(renderPass);
-    composer.addPass(effectPass);
-    this.composer = composer;
-    this.fxaaEffect = fxaa;
-    this.bloomEffect = bloom;
-    this.effectPass = effectPass;
   }
 
   _buildStarfield() {
@@ -980,7 +964,7 @@ class AuroraOrbitVisualizer {
   }
 
   update(freq, wave, dt) {
-    if (!this.renderer || !this.uniforms) return;
+    if (!this.renderer || !this.scene || !this.camera || !this.uniforms) return;
     this.time += dt;
 
     this._computeAudioFeatures(freq, wave);
@@ -1091,7 +1075,13 @@ class AuroraOrbitVisualizer {
       this.composer = null;
     }
     if (this.renderer) {
-      this.container.removeChild(this.renderer.domElement);
+      if (
+        this.container &&
+        this.renderer.domElement &&
+        this.renderer.domElement.parentNode === this.container
+      ) {
+        this.container.removeChild(this.renderer.domElement);
+      }
       this.renderer.dispose();
       this.renderer = null;
     }
