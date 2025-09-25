@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Local Jukebox + Visualizer</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="modulepreload" href="modules/three.module.js" />
+  <link rel="modulepreload" href="modules/postprocessing.js" />
 </head>
 <body>
   <header class="app-header">
@@ -53,6 +55,15 @@
   </footer>
 
   <audio id="audio" crossorigin="anonymous"></audio>
+  <script>
+    window.AURORA_VENDOR_MODULES = Object.assign(
+      {
+        three: './modules/three.module.js',
+        postprocessing: './modules/postprocessing.js'
+      },
+      window.AURORA_VENDOR_MODULES || {}
+    );
+  </script>
   <script type="module" src="visualizers/aurora.js"></script>
   <script type="module" src="visualizers/aurora2d.js"></script>
   <script type="module" src="app.js"></script>

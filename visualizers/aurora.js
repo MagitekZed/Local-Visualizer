@@ -1,11 +1,43 @@
-import * as THREE from '../modules/three.module.js';
-import {
+const GLOBAL = typeof window !== 'undefined' ? window : undefined;
+
+async function loadModule(options) {
+  for (const src of options) {
+    if (!src) continue;
+    try {
+      return await import(src);
+    } catch (err) {
+      console.warn(`Failed loading module ${src}:`, err);
+    }
+  }
+  throw new Error('Unable to load requested module');
+}
+
+const moduleBase = new URL('.', import.meta.url);
+const vendorConfig = (GLOBAL && GLOBAL.AURORA_VENDOR_MODULES) || {};
+
+const threeModule = await loadModule([
+  vendorConfig.three ? new URL(vendorConfig.three, moduleBase).href : null,
+  new URL('../modules/three.module.js', moduleBase).href,
+  'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js'
+]);
+const THREE = threeModule;
+
+const postModule = await loadModule([
+  vendorConfig.postprocessing ? new URL(vendorConfig.postprocessing, moduleBase).href : null,
+  new URL('../modules/postprocessing.js', moduleBase).href,
+  'https://cdn.jsdelivr.net/npm/postprocessing@6.35.3/build/postprocessing.esm.js'
+]);
+const {
   EffectComposer,
   RenderPass,
   EffectPass,
   FXAAEffect,
   BloomEffect
-} from '../modules/postprocessing.js';
+} = postModule;
+
+if (THREE.ColorManagement && THREE.ColorManagement.enabled !== undefined) {
+  THREE.ColorManagement.enabled = true;
+}
 
 // Lightweight seeded simplex noise for smooth procedural motion.
 class SimplexNoise {
@@ -117,47 +149,61 @@ class SimplexNoise {
 }
 
 const QUALITY_PRESETS = {
-  high: { particles: 19000, ribbons: 4, ribbonSegments: 170, bloom: 1.0 },
-  medium: { particles: 11500, ribbons: 3, ribbonSegments: 130, bloom: 0.8 },
-  low: { particles: 5500, ribbons: 2, ribbonSegments: 90, bloom: 0.6 }
+  high: { particles: 20000, ribbons: 4, ribbonSegments: 170, bloom: 1.0 },
+  medium: { particles: 12000, ribbons: 3, ribbonSegments: 140, bloom: 0.85 },
+  low: { particles: 6000, ribbons: 2, ribbonSegments: 110, bloom: 0.7 }
 };
 
 const BASE_GRADIENT = [
-  { h: 208 / 360, s: 0.78, l: 0.62 },
-  { h: 190 / 360, s: 0.85, l: 0.58 },
-  { h: 280 / 360, s: 0.7, l: 0.6 },
-  { h: 320 / 360, s: 0.65, l: 0.57 }
+  { h: 178 / 360, s: 0.9, l: 0.58 },
+  { h: 204 / 360, s: 0.92, l: 0.6 },
+  { h: 286 / 360, s: 0.94, l: 0.56 },
+  { h: 324 / 360, s: 0.98, l: 0.6 },
+  { h: 48 / 360, s: 0.92, l: 0.62 }
 ];
+
+function radicalInverse(base, n) {
+  let inv = 0;
+  let denom = 1 / base;
+  while (n > 0) {
+    inv += (n % base) * denom;
+    n = Math.floor(n / base);
+    denom /= base;
+  }
+  return inv;
+}
 
 function makeTorusAttribute(count, majorRadius, minorRadius) {
   const positions = new Float32Array(count * 3);
   const angles = new Float32Array(count * 2);
   const seeds = new Float32Array(count * 2);
-
+  const TWO_PI = Math.PI * 2;
   for (let i = 0; i < count; i++) {
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.random() * Math.PI * 2;
-    const jitter = (Math.random() - 0.5) * 0.1;
-    const minor = minorRadius * (1 + jitter);
-    const cosPhi = Math.cos(phi);
-    const sinPhi = Math.sin(phi);
+    const idx = i + 1;
+    const theta = radicalInverse(2, idx) * TWO_PI;
+    const phi = radicalInverse(3, idx) * TWO_PI;
+    const minorJitter = 0.04 * Math.sin(idx * 2.37);
+    const twistJitter = 0.06 * Math.cos(idx * 1.71);
+    const minor = minorRadius * (1 + minorJitter);
+    const cosPhi = Math.cos(phi + twistJitter);
+    const sinPhi = Math.sin(phi + twistJitter);
     const cosTheta = Math.cos(theta);
     const sinTheta = Math.sin(theta);
-    const x = (majorRadius + minor * cosPhi) * cosTheta;
-    const y = minor * sinPhi;
-    const z = (majorRadius + minor * cosPhi) * sinTheta;
+    const radius = majorRadius + minor * cosPhi;
 
-    const idx3 = i * 3;
-    positions[idx3] = x;
-    positions[idx3 + 1] = y;
-    positions[idx3 + 2] = z;
+    const baseIndex = i * 3;
+    positions[baseIndex] = radius * cosTheta;
+    positions[baseIndex + 1] = minor * sinPhi;
+    positions[baseIndex + 2] = radius * sinTheta;
 
-    const idx2 = i * 2;
-    angles[idx2] = theta;
-    angles[idx2 + 1] = phi;
+    const angleIndex = i * 2;
+    angles[angleIndex] = theta;
+    angles[angleIndex + 1] = phi;
 
-    seeds[idx2] = Math.random();
-    seeds[idx2 + 1] = Math.random();
+    const seedA = Math.sin(idx * 12.9898) * 43758.5453;
+    const seedB = Math.sin(idx * 78.233) * 19642.3496;
+    seeds[angleIndex] = seedA - Math.floor(seedA);
+    seeds[angleIndex + 1] = seedB - Math.floor(seedB);
   }
 
   return { positions, angles, seeds };
@@ -167,30 +213,83 @@ function makeStarfield(count, radius) {
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
+  const twinkle = new Float32Array(count);
+  const TWO_PI = Math.PI * 2;
+  const tempColor = new THREE.Color();
+
   for (let i = 0; i < count; i++) {
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-    const r = radius * (0.6 + Math.random() * 0.4);
+    const idx = i + 1;
+    const u = radicalInverse(2, idx);
+    const v = radicalInverse(3, idx);
+    const theta = u * TWO_PI;
+    const phi = Math.acos(2 * v - 1);
+    const r = radius * (0.45 + 0.55 * ((idx * 0.61803398875) % 1));
     const sinPhi = Math.sin(phi);
-    const idx = i * 3;
-    positions[idx] = r * Math.cos(theta) * sinPhi;
-    positions[idx + 1] = r * Math.cos(phi);
-    positions[idx + 2] = r * Math.sin(theta) * sinPhi;
-    const tint = 0.7 + Math.random() * 0.3;
-    colors[idx] = 0.45 * tint;
-    colors[idx + 1] = 0.55 * tint;
-    colors[idx + 2] = 0.7 * tint;
+    const posIdx = i * 3;
+    positions[posIdx] = r * Math.cos(theta) * sinPhi;
+    positions[posIdx + 1] = r * Math.cos(phi);
+    positions[posIdx + 2] = r * Math.sin(theta) * sinPhi;
+
+    const baseTint = 0.35 + 0.65 * ((idx * 0.31830988618) % 1);
+    const hue = 220 / 360 + 0.08 * baseTint;
+    const sat = 0.55 + 0.35 * baseTint;
+    const light = 0.35 + 0.45 * baseTint;
+    tempColor.setHSL(hue, sat, light).convertSRGBToLinear();
+    colors[posIdx] = tempColor.r;
+    colors[posIdx + 1] = tempColor.g;
+    colors[posIdx + 2] = tempColor.b;
+
+    const tw = Math.sin(idx * 4.129) * 0.5 + 0.5;
+    twinkle[i] = tw;
   }
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  const material = new THREE.PointsMaterial({
-    size: 0.08,
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute('aTwinkle', new THREE.BufferAttribute(twinkle, 1));
+
+  const uniforms = {
+    uTime: { value: 0 }
+  };
+
+  const material = new THREE.ShaderMaterial({
+    uniforms,
     vertexColors: true,
-    depthWrite: false,
     transparent: true,
-    opacity: 0.65
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: `
+      precision mediump float;
+      uniform float uTime;
+      attribute float aTwinkle;
+      varying float vTwinkle;
+      varying vec3 vColor;
+      void main(){
+        vColor = color;
+        float flicker = sin(uTime * 0.6 + aTwinkle * 6.2831) * 0.5 + 0.5;
+        vTwinkle = mix(0.35, 1.0, flicker);
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        float dist = max(1.0, -mvPosition.z);
+        gl_PointSize = (1.2 + aTwinkle * 0.6 + flicker * 0.8) * (180.0 / dist);
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `,
+    fragmentShader: `
+      precision mediump float;
+      varying float vTwinkle;
+      varying vec3 vColor;
+      void main(){
+        vec2 uv = gl_PointCoord - 0.5;
+        float d = dot(uv, uv);
+        if (d > 0.25) discard;
+        float falloff = pow(1.0 - d * 4.0, 1.8);
+        vec3 col = vColor * (0.4 + vTwinkle * 0.9) * falloff;
+        gl_FragColor = vec4(col, falloff * vTwinkle);
+      }
+    `
   });
-  return new THREE.Points(geometry, material);
+
+  const points = new THREE.Points(geometry, material);
+  return { points, uniforms };
 }
 
 class AuroraRibbon {
@@ -199,10 +298,13 @@ class AuroraRibbon {
     this.noise = noise;
     this.seed = Math.random() * 1000;
     this.phase = Math.random() * Math.PI * 2;
-    this.phiOffset = (Math.random() * 0.7 + 0.2) * (Math.random() > 0.5 ? 1 : -1);
-    this.speed = 0.12 + Math.random() * 0.08;
-    this.twist = 0.6 + Math.random() * 0.4;
-    this.baseWidth = 0.08 + Math.random() * 0.04;
+    this.phiOffset = (Math.random() * 0.75 + 0.2) * (Math.random() > 0.5 ? 1 : -1);
+    this.speed = 0.1 + Math.random() * 0.07;
+    this.twistBase = 0.5 + Math.random() * 0.45;
+    this.baseWidth = 0.085 + Math.random() * 0.045;
+    this.amplitudeBase = 0.5 + Math.random() * 0.6;
+    this.flowOffset = Math.random() * 10;
+    this.majorRadius = 2.2;
     this.palette = palette;
 
     const vertexCount = segments * 2;
@@ -259,9 +361,11 @@ class AuroraRibbon {
         attribute float aSide;
         varying float vAlong;
         varying float vSide;
+        varying float vStripe;
         void main(){
           vAlong = aAlong;
           vSide = aSide;
+          vStripe = sin(aAlong * 6.2831 + uTime * 0.6);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
@@ -271,15 +375,20 @@ class AuroraRibbon {
         uniform vec3 uColorB;
         uniform float uEnergy;
         uniform float uGlow;
+        uniform float uTime;
         varying float vAlong;
         varying float vSide;
+        varying float vStripe;
         void main(){
-          float core = 1.0 - smoothstep(0.0, 1.0, abs(vSide));
-          float fringe = smoothstep(0.0, 0.7, core);
-          vec3 color = mix(uColorA, uColorB, pow(vAlong, 1.6));
-          color *= (0.6 + 0.4 * fringe);
-          color += vec3(0.45, 0.35, 0.6) * uEnergy * fringe;
-          float alpha = pow(core, 1.2) * uGlow;
+          float core = clamp(1.0 - abs(vSide), 0.0, 1.0);
+          float mainBand = pow(core, 1.4);
+          float edge = pow(core, 3.2);
+          float mixVal = smoothstep(0.0, 1.0, vAlong + 0.2 * sin(vAlong * 4.0 + uTime * 0.5));
+          vec3 color = mix(uColorA, uColorB, mixVal);
+          color *= 0.5 + mainBand * (1.2 + uEnergy * 0.8);
+          vec3 accent = mix(uColorA, uColorB, 0.5 + 0.5 * vStripe);
+          color += accent * edge * (0.25 + uEnergy * 0.75);
+          float alpha = mainBand * (0.45 + uGlow * 0.7);
           if (alpha < 0.01) discard;
           gl_FragColor = vec4(color, alpha);
         }
@@ -302,31 +411,37 @@ class AuroraRibbon {
     const bass = audio.bass;
     const mids = audio.mids;
     const energy = audio.energy;
-
-    const amp = amplitude * (0.6 + 1.2 * mids);
+    const twist = this.twistBase + mids * 1.4;
+    const amp = amplitude * this.amplitudeBase * (0.5 + mids * 1.1);
 
     for (let i = 0; i < segments; i++) {
       const t = i / (segments - 1);
       const theta = t * Math.PI * 2 + time * this.speed + this.phase;
-      const noiseVal = this.noise.noise3D(theta * 0.6, this.seed * 0.17, time * 0.35 + this.seed);
-      const wobble = this.noise.noise3D(theta * this.twist, this.seed * 0.07, time * 0.52) * 0.6;
-      const phi = this.phiOffset + wobble;
-      const minor = minorRadius * (1.0 + 0.2 * Math.sin(theta * 1.8 + this.phase)) + amp * noiseVal;
+      const flow = this.noise.noise3D(theta * 0.35, this.seed * 0.27, time * 0.2 + this.flowOffset);
+      const phiNoise = this.noise.noise3D(theta * 0.2 + this.seed, time * 0.32, this.flowOffset * 0.5);
+      const phi = this.phiOffset + phiNoise * twist + Math.sin(theta * 0.6 + time * 0.8 + this.seed) * 0.15;
+      const radialNoise = this.noise.noise3D(theta * 0.58, time * 0.18, this.seed * 1.7);
+      const minor = minorRadius * (1.0 + 0.22 * radialNoise);
       const cosTheta = Math.cos(theta);
       const sinTheta = Math.sin(theta);
       const cosPhi = Math.cos(phi);
       const sinPhi = Math.sin(phi);
-      const x = (2.2 + (minor + amp * 0.1) * cosPhi) * cosTheta;
-      const y = (minor + amp * 0.2) * sinPhi;
-      const z = (2.2 + (minor + amp * 0.1) * cosPhi) * sinTheta;
+      const radius = this.majorRadius + minor * cosPhi;
+      const baseX = radius * cosTheta;
+      const baseY = minor * sinPhi;
+      const baseZ = radius * sinTheta;
+      const radialX = cosTheta * cosPhi;
+      const radialY = sinPhi;
+      const radialZ = sinTheta * cosPhi;
+      const offset = amp * flow;
       const idx = i * 3;
-      centers[idx] = x;
-      centers[idx + 1] = y;
-      centers[idx + 2] = z;
+      centers[idx] = baseX + radialX * offset;
+      centers[idx + 1] = baseY + radialY * offset;
+      centers[idx + 2] = baseZ + radialZ * offset;
       phiArray[i] = phi;
     }
 
-    const widthBase = this.baseWidth * (1.0 + 0.4 * bass);
+    const widthBase = this.baseWidth * (0.9 + bass * 0.5);
     for (let i = 0; i < segments; i++) {
       const idx = i * 3;
       const prevIdx = i === 0 ? 0 : (i - 1) * 3;
@@ -345,13 +460,19 @@ class AuroraRibbon {
       const cy = centers[idx + 1];
       const cz = centers[idx + 2];
 
-      const toCenterX = cx;
-      const toCenterY = cy * 0.4;
-      const toCenterZ = cz;
-      len = Math.hypot(toCenterX, toCenterY, toCenterZ) || 1;
-      const normalX = toCenterX / len;
-      const normalY = toCenterY / len;
-      const normalZ = toCenterZ / len;
+      const phi = phiArray[i];
+      const theta = (i / (segments - 1)) * Math.PI * 2 + time * this.speed + this.phase;
+      const cosTheta = Math.cos(theta);
+      const sinTheta = Math.sin(theta);
+      const cosPhi = Math.cos(phi);
+      const sinPhi = Math.sin(phi);
+      let normalX = cosTheta * cosPhi;
+      let normalY = sinPhi;
+      let normalZ = sinTheta * cosPhi;
+      len = Math.hypot(normalX, normalY, normalZ) || 1;
+      normalX /= len;
+      normalY /= len;
+      normalZ /= len;
 
       const binormal = this.tmpBinormal;
       binormal[0] = tangent[1] * normalZ - tangent[2] * normalY;
@@ -362,16 +483,21 @@ class AuroraRibbon {
       binormal[1] /= len;
       binormal[2] /= len;
 
-      const wave = Math.sin(i * 0.32 + time * 1.6 + this.seed) * 0.5 + 0.5;
-      const width = widthBase * (0.8 + 0.7 * wave) * (0.7 + 0.6 * mids);
+      const wave = Math.sin(i * 0.3 + time * 1.35 + this.seed) * 0.5 + 0.5;
+      const width = widthBase * (0.8 + 0.7 * wave) * (0.8 + mids * 0.8) * (0.85 + energy * 0.7);
+      const swirl = amp * 0.35 * this.noise.noise3D(theta * 0.48, this.seed, time * 0.45);
+
+      const nx = normalX * swirl;
+      const ny = normalY * swirl;
+      const nz = normalZ * swirl;
 
       const vIdx = i * 6;
-      positions[vIdx] = cx - binormal[0] * width;
-      positions[vIdx + 1] = cy - binormal[1] * width;
-      positions[vIdx + 2] = cz - binormal[2] * width;
-      positions[vIdx + 3] = cx + binormal[0] * width;
-      positions[vIdx + 4] = cy + binormal[1] * width;
-      positions[vIdx + 5] = cz + binormal[2] * width;
+      positions[vIdx] = cx - binormal[0] * width + nx;
+      positions[vIdx + 1] = cy - binormal[1] * width + ny;
+      positions[vIdx + 2] = cz - binormal[2] * width + nz;
+      positions[vIdx + 3] = cx + binormal[0] * width + nx;
+      positions[vIdx + 4] = cy + binormal[1] * width + ny;
+      positions[vIdx + 5] = cz + binormal[2] * width + nz;
     }
 
     this.geometry.attributes.position.needsUpdate = true;
@@ -381,7 +507,7 @@ class AuroraRibbon {
     this.material.uniforms.uColorA.value.setHSL((hueA + 1) % 1, this.palette.s1, this.palette.l1).convertSRGBToLinear();
     this.material.uniforms.uColorB.value.setHSL((hueB + 1) % 1, this.palette.s2, this.palette.l2).convertSRGBToLinear();
     this.material.uniforms.uEnergy.value = energy;
-    this.material.uniforms.uGlow.value = 0.8 + energy * 1.4;
+    this.material.uniforms.uGlow.value = 0.7 + energy * 1.6 + mids * 0.4;
     this.material.uniforms.uTime.value = time;
   }
 
@@ -423,6 +549,7 @@ class AuroraOrbitVisualizer {
     this.uniforms = null;
     this.ribbons = [];
     this.starfield = null;
+    this.starfieldUniforms = null;
     this.simplex = new SimplexNoise(4711);
     this.time = 0;
     this.hueShift = 0;
@@ -434,19 +561,26 @@ class AuroraOrbitVisualizer {
       energy: 0,
       bass: 0,
       mids: 0,
-      highs: 0,
-      sparkle: 0
+      highs: 0
     };
     this.lastBass = 0;
     this.peakPulse = 0;
-    this.gradientUniforms = [new THREE.Color(), new THREE.Color(), new THREE.Color(), new THREE.Color()];
+    this.gradientUniforms = [
+      new THREE.Color(),
+      new THREE.Color(),
+      new THREE.Color(),
+      new THREE.Color(),
+      new THREE.Color()
+    ];
     this.gradientWorkingColor = new THREE.Color();
     this.gradientBaseHSL = BASE_GRADIENT.map((c) => ({ ...c }));
     this.resizeObserver = null;
     this.pixelRatio = 1;
     this.width = 1;
     this.height = 1;
-    this.minorRadius = 0.62;
+    this.baseMinor = 0.66;
+    this.minorRadius = this.baseMinor;
+    this.baseFov = 53;
     this.contextLostHandler = null;
   }
 
@@ -459,6 +593,9 @@ class AuroraOrbitVisualizer {
     }
     if (this.ribbons.length) {
       this._buildRibbons();
+    }
+    if (this.starfield) {
+      this._buildStarfield();
     }
     if (this.bloomEffect) {
       this.bloomEffect.intensity = this.qualitySettings.bloom;
@@ -477,6 +614,15 @@ class AuroraOrbitVisualizer {
     this.renderer = renderer;
     renderer.setPixelRatio(1);
     renderer.setClearColor(0x05060a, 1);
+    if (renderer.outputColorSpace !== undefined && THREE.SRGBColorSpace) {
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+    } else if (renderer.outputEncoding !== undefined && THREE.sRGBEncoding !== undefined) {
+      renderer.outputEncoding = THREE.sRGBEncoding;
+    }
+    if (THREE.ACESFilmicToneMapping !== undefined) {
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+    }
     renderer.domElement.className = 'aurora-orbit-webgl';
     renderer.domElement.style.position = 'absolute';
     renderer.domElement.style.inset = '0';
@@ -496,8 +642,8 @@ class AuroraOrbitVisualizer {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x05060a, 12, 24);
 
-    this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 40);
-    this.camera.position.set(0, 0.6, 4.6);
+    this.camera = new THREE.PerspectiveCamera(this.baseFov, 1, 0.1, 45);
+    this.camera.position.set(0, 0.5, 4.6);
 
     this._buildParticles();
     this._buildRibbons();
@@ -520,12 +666,15 @@ class AuroraOrbitVisualizer {
   _setupPost() {
     if (!this.renderer || !this.camera) return;
     const composer = new EffectComposer(this.renderer);
+    if ('multisampling' in composer) {
+      composer.multisampling = 0;
+    }
     const renderPass = new RenderPass(this.scene, this.camera);
     const fxaa = new FXAAEffect();
     const bloom = new BloomEffect({
       intensity: this.qualitySettings.bloom,
-      luminanceThreshold: 0.36,
-      luminanceSmoothing: 0.18,
+      luminanceThreshold: 0.35,
+      luminanceSmoothing: 0.16,
       radius: 0.85
     });
     bloom.blendMode.opacity.value = 1.0;
@@ -536,6 +685,7 @@ class AuroraOrbitVisualizer {
     this.composer = composer;
     this.fxaaEffect = fxaa;
     this.bloomEffect = bloom;
+    this.effectPass = effectPass;
   }
 
   _buildStarfield() {
@@ -544,7 +694,10 @@ class AuroraOrbitVisualizer {
       this.starfield.geometry.dispose();
       this.starfield.material.dispose();
     }
-    this.starfield = makeStarfield(700, 18);
+    const density = this.quality === 'high' ? 3200 : this.quality === 'medium' ? 2200 : 1600;
+    const { points, uniforms } = makeStarfield(density, 22);
+    this.starfield = points;
+    this.starfieldUniforms = uniforms;
     this.scene.add(this.starfield);
   }
 
@@ -556,10 +709,10 @@ class AuroraOrbitVisualizer {
     }
 
     const count = this.qualitySettings.particles;
-    const { positions, angles, seeds } = makeTorusAttribute(count, 2.2, this.minorRadius);
+    const { positions, angles, seeds } = makeTorusAttribute(count, 2.2, this.baseMinor);
 
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('aPosition', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('aAngles', new THREE.BufferAttribute(angles, 2));
     geometry.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 2));
 
@@ -570,17 +723,15 @@ class AuroraOrbitVisualizer {
       uMids: { value: 0 },
       uHighs: { value: 0 },
       uHue: { value: 0 },
-      uSize: { value: 16.0 },
+      uSize: { value: 22.0 },
       uBloomBoost: { value: 0 },
-      uMinorRadius: { value: this.minorRadius },
-      uSparkle: { value: 0 },
+      uMinorRadius: { value: this.baseMinor },
       uGradient: { value: this.gradientUniforms }
     };
     this.uniforms = uniforms;
 
     const vertexShader = `
       precision mediump float;
-      attribute vec3 aPosition;
       attribute vec2 aAngles;
       attribute vec2 aSeed;
       uniform float uTime;
@@ -591,14 +742,13 @@ class AuroraOrbitVisualizer {
       uniform float uHue;
       uniform float uSize;
       uniform float uMinorRadius;
-      uniform float uSparkle;
-      varying float vSpark;
+      varying float vSparkle;
       varying float vGrad;
       varying float vDepth;
-      const float PI = 3.14159265359;
+      varying float vFlux;
+      const float PI = 3.141592653589793;
 
-      // Simple hash for sparkle
-      float hash12(vec2 p){
+      float hash21(vec2 p){
         vec3 p3 = fract(vec3(p.xyx) * 0.1031);
         p3 += dot(p3, p3.yzx + 33.33);
         return fract((p3.x + p3.y) * p3.z);
@@ -608,67 +758,83 @@ class AuroraOrbitVisualizer {
         float theta = aAngles.x;
         float phi = aAngles.y;
 
-        float swing = sin(theta * 2.1 + uTime * 1.2 + aSeed.x * 6.283) * 0.25;
-        float minor = uMinorRadius * (1.0 + 0.08 * sin(uTime * 0.8 + aSeed.y * 10.0)) + swing * (0.5 + 0.8 * uBass);
-        float wobble = sin(phi * 3.0 + uTime * 1.7 + aSeed.y * 5.0) * 0.18;
-        minor += wobble * (0.4 + 0.7 * uMids);
+        float minor = uMinorRadius;
+        minor += uMinorRadius * 0.12 * sin(uTime * 0.6 + theta * 1.9 + aSeed.x * 9.0);
+        minor += uMinorRadius * 0.10 * sin(phi * 2.2 + uTime * 0.8 + aSeed.y * 7.0) * (0.6 + 0.9 * uMids);
+        minor += uMinorRadius * 0.05 * sin(theta * 3.5 + uTime * 1.4);
 
         float cosTheta = cos(theta);
         float sinTheta = sin(theta);
         float cosPhi = cos(phi);
         float sinPhi = sin(phi);
 
-        float radius = 2.2 + (minor) * cosPhi;
-        vec3 pos;
-        pos.x = radius * cosTheta;
-        pos.y = (minor) * sinPhi;
-        pos.z = radius * sinTheta;
-
+        float major = 2.2;
+        float radius = major + minor * cosPhi;
+        vec3 pos = vec3(radius * cosTheta, minor * sinPhi, radius * sinTheta);
         vec3 radial = normalize(vec3(cosTheta * cosPhi, sinPhi, sinTheta * cosPhi));
-        float shimmer = sin(uTime * 3.5 + aSeed.x * 14.0) * (0.03 + 0.05 * uHighs);
-        pos += radial * shimmer;
+        float flutter = sin(uTime * 1.1 + aSeed.x * 20.0 + theta * 2.4) * 0.04;
+        pos += radial * flutter * (0.6 + 0.8 * uHighs);
 
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-        float dist = -mvPosition.z;
-        float size = uSize * (1.0 + 0.6 * uBass) * (1.0 + 0.3 * sin(theta * 4.0 + uTime + aSeed.x * 12.0)) * (1.0 + uEnergy * 0.4);
-        gl_PointSize = size * (300.0 / max(dist, 40.0));
-        vDepth = clamp(1.0 - dist / 18.0, 0.0, 1.0);
+        float dist = max(1.0, -mvPosition.z);
 
-        float sparkleSeed = hash12(aSeed + uTime * 0.015);
-        float sparkleGate = step(0.78, sparkleSeed + uSparkle * 0.85);
-        vSpark = sparkleGate * (0.25 + 1.4 * uHighs);
-        vGrad = clamp(0.3 + 0.6 * sin(phi + uTime * 0.35 + uHue) + 0.2 * aSeed.x, 0.0, 1.0);
+        float sparkleRand = hash21(aSeed + uTime * 0.13);
+        float sparkleGate = step(1.0 - clamp(uHighs * 1.25 + 0.12, 0.08, 0.96), sparkleRand);
+        vSparkle = sparkleGate;
+        vGrad = fract((phi / (2.0 * PI)) + uHue * 0.08 + aSeed.x * 0.25);
+        vDepth = clamp(1.0 - dist / 28.0, 0.0, 1.0);
+        vFlux = 0.55 + 0.45 * sin(theta * 1.6 + uTime * 0.6 + aSeed.y * 3.0);
 
+        float size = uSize * (0.9 + uBass * 0.6 + uEnergy * 0.4);
+        size *= 1.0 + 0.25 * sin(theta * 5.0 + uTime * 1.7 + aSeed.x * 12.0);
+        gl_PointSize = size * (220.0 / dist);
         gl_Position = projectionMatrix * mvPosition;
       }
     `;
 
     const fragmentShader = `
       precision mediump float;
-      uniform vec3 uGradient[4];
+      uniform vec3 uGradient[5];
       uniform float uBloomBoost;
       uniform float uEnergy;
-      varying float vSpark;
+      uniform float uHighs;
+      varying float vSparkle;
       varying float vGrad;
       varying float vDepth;
+      varying float vFlux;
 
       vec3 gradient(float t){
-        vec3 c1 = mix(uGradient[0], uGradient[1], clamp(t, 0.0, 1.0));
-        vec3 c2 = mix(uGradient[2], uGradient[3], clamp(t, 0.0, 1.0));
-        float m = smoothstep(0.25, 0.85, t);
-        return mix(c1, c2, m);
+        vec3 c0 = uGradient[0];
+        vec3 c1 = uGradient[1];
+        vec3 c2 = uGradient[2];
+        vec3 c3 = uGradient[3];
+        vec3 c4 = uGradient[4];
+        float m1 = smoothstep(0.0, 0.32, t);
+        float m2 = smoothstep(0.25, 0.55, t);
+        float m3 = smoothstep(0.5, 0.78, t);
+        float m4 = smoothstep(0.72, 1.0, t);
+        vec3 low = mix(c0, c1, m1);
+        vec3 mid = mix(c1, c2, m2);
+        vec3 high = mix(c2, c3, m3);
+        vec3 apex = mix(c3, c4, m4);
+        vec3 blend1 = mix(low, mid, smoothstep(0.12, 0.5, t));
+        vec3 blend2 = mix(high, apex, smoothstep(0.55, 1.0, t));
+        return mix(blend1, blend2, smoothstep(0.45, 0.92, t));
       }
 
       void main(){
         vec2 uv = gl_PointCoord - 0.5;
         float d = dot(uv, uv);
         if (d > 0.25) discard;
-        float falloff = pow(1.0 - d * 4.0, 1.6);
-        vec3 color = gradient(vGrad) * (0.55 + falloff * 0.6);
-        color += vec3(0.9, 0.85, 1.2) * vSpark * falloff;
-        color *= 1.0 + uBloomBoost * (0.4 + vDepth * 0.6);
-        color *= 0.9 + uEnergy * 0.6;
-        float alpha = falloff * (0.4 + 0.5 * vDepth + uEnergy * 0.15);
+        float falloff = pow(1.0 - d * 4.0, 1.9);
+        float energyGlow = 0.75 + uEnergy * 0.8;
+        vec3 color = gradient(vGrad);
+        color *= 0.45 + energyGlow * falloff * (1.3 + vFlux * 0.5);
+        float sparkle = vSparkle * (1.0 + uHighs * 1.8) * falloff;
+        color += vec3(1.15, 0.95, 1.25) * sparkle;
+        color *= 1.0 + uBloomBoost * (0.45 + vDepth * 0.65);
+        float alpha = falloff * (0.3 + 0.55 * vDepth) * energyGlow;
+        if (alpha < 0.01) discard;
         gl_FragColor = vec4(color, alpha);
       }
     `;
@@ -691,10 +857,10 @@ class AuroraOrbitVisualizer {
     this.ribbons = [];
 
     const palettes = [
-      { h1: 200 / 360, s1: 0.8, l1: 0.52, h2: 280 / 360, s2: 0.72, l2: 0.55 },
-      { h1: 320 / 360, s1: 0.7, l1: 0.56, h2: 200 / 360, s2: 0.82, l2: 0.5 },
-      { h1: 50 / 360, s1: 0.65, l1: 0.6, h2: 200 / 360, s2: 0.78, l2: 0.55 },
-      { h1: 180 / 360, s1: 0.6, l1: 0.55, h2: 330 / 360, s2: 0.75, l2: 0.56 }
+      { h1: 190 / 360, s1: 0.95, l1: 0.56, h2: 302 / 360, s2: 0.96, l2: 0.58 },
+      { h1: 165 / 360, s1: 0.9, l1: 0.54, h2: 46 / 360, s2: 0.96, l2: 0.6 },
+      { h1: 212 / 360, s1: 0.94, l1: 0.55, h2: 330 / 360, s2: 0.98, l2: 0.6 },
+      { h1: 285 / 360, s1: 0.88, l1: 0.55, h2: 60 / 360, s2: 0.95, l2: 0.62 }
     ];
 
     for (let i = 0; i < this.qualitySettings.ribbons; i++) {
@@ -769,14 +935,15 @@ class AuroraOrbitVisualizer {
     rms = Math.sqrt(rms / wave.length);
 
     const lerp = (a, b, t) => a + (b - a) * t;
-    const smooth = 0.2;
+    const bassAvg = bassCount ? bassSum / Math.max(1, bassCount) : 0;
+    const midsAvg = midsCount ? midsSum / Math.max(1, midsCount) : 0;
+    const highsAvg = highsCount ? highsSum / Math.max(1, highsCount) : 0;
 
-    const energy = Math.min(1, rms);
-    this.audioState.energy = lerp(this.audioState.energy, energy, smooth);
-    this.audioState.bass = lerp(this.audioState.bass, bassCount ? bassSum / bassCount : 0, smooth);
-    this.audioState.mids = lerp(this.audioState.mids, midsCount ? midsSum / midsCount : 0, smooth);
-    this.audioState.highs = lerp(this.audioState.highs, highsCount ? highsSum / highsCount : 0, smooth);
-    this.audioState.sparkle = lerp(this.audioState.sparkle, Math.pow(this.audioState.highs, 1.2), 0.22);
+    const energy = Math.min(1, rms * 1.2);
+    this.audioState.energy = lerp(this.audioState.energy, energy, 0.14);
+    this.audioState.bass = lerp(this.audioState.bass, bassAvg, 0.18);
+    this.audioState.mids = lerp(this.audioState.mids, midsAvg, 0.18);
+    this.audioState.highs = lerp(this.audioState.highs, highsAvg, 0.2);
 
     const levels = this.bandLevels;
     if (levels.length !== this.bandMap.length) {
@@ -789,7 +956,7 @@ class AuroraOrbitVisualizer {
       for (let b = b0; b < b1; b++) sum += freq[b];
       const avg = sum / Math.max(1, b1 - b0);
       const target = Math.pow(avg / 255, 0.9);
-      bandLevels[i] = lerp(bandLevels[i] || 0, target, 0.2);
+      bandLevels[i] = lerp(bandLevels[i] || 0, target, 0.18);
     }
   }
 
@@ -801,7 +968,7 @@ class AuroraOrbitVisualizer {
 
     const audio = this.audioState;
 
-    this.hueShift += dt * (0.4 + audio.energy * 2.6);
+    this.hueShift += dt * (0.18 + audio.energy * 3.2);
     const hueShift = this.hueShift;
 
     const uniforms = this.uniforms;
@@ -811,24 +978,25 @@ class AuroraOrbitVisualizer {
     uniforms.uMids.value = audio.mids;
     uniforms.uHighs.value = audio.highs;
     uniforms.uHue.value = hueShift;
-    uniforms.uSparkle.value = audio.sparkle;
-
-    const baseMinor = 0.62 * (1.0 + audio.bass * 0.12);
-    this.minorRadius = baseMinor;
+    const bassPulse = Math.max(-1, Math.min(1, audio.bass * 2.0 - 1.0));
+    this.minorRadius = Math.max(0.45, this.baseMinor * (1.0 + bassPulse * 0.12));
     uniforms.uMinorRadius.value = this.minorRadius;
 
-    const bloomBoost = Math.min(1.6, audio.energy * 1.2 + audio.highs * 0.6);
+    const bloomBoost = Math.min(1.8, audio.energy * 1.3 + audio.highs * 0.7);
     uniforms.uBloomBoost.value = bloomBoost;
 
     if (this.bloomEffect) {
-      this.bloomEffect.intensity = this.qualitySettings.bloom * (1.0 + audio.energy * 0.5 + bloomBoost * 0.4);
-      this.bloomEffect.luminanceMaterial.threshold = 0.34 - Math.min(0.15, audio.energy * 0.12);
-      this.bloomEffect.luminanceMaterial.smoothing = 0.18 + audio.highs * 0.1;
+      const baseBloom = this.qualitySettings.bloom;
+      this.bloomEffect.intensity = baseBloom * (1.0 + audio.energy * 1.1 + audio.highs * 0.3);
+      if (this.bloomEffect.luminanceMaterial) {
+        this.bloomEffect.luminanceMaterial.threshold = 0.35 - Math.min(0.1, audio.energy * 0.08);
+        this.bloomEffect.luminanceMaterial.smoothing = 0.16 + audio.highs * 0.12;
+      }
     }
 
-    const pulseTrigger = audio.bass > this.lastBass + 0.18 && audio.bass > 0.35;
+    const pulseTrigger = audio.bass > this.lastBass + 0.22 && audio.bass > 0.4;
     if (pulseTrigger) this.peakPulse = 1.0;
-    this.peakPulse = Math.max(0, this.peakPulse - dt * 1.6);
+    this.peakPulse = Math.max(0, this.peakPulse - dt * 1.5);
     this.lastBass = audio.bass;
 
     const colors = this.gradientUniforms;
@@ -841,26 +1009,32 @@ class AuroraOrbitVisualizer {
     }
 
     for (const ribbon of this.ribbons) {
-      ribbon.update(this.time, audio, this.minorRadius * (1.0 + audio.bass * 0.25), 0.45 + audio.energy * 0.4, hueShift);
+      ribbon.update(this.time, audio, this.minorRadius, 0.5 + audio.energy * 0.45, hueShift);
     }
 
     if (this.starfield) {
-      this.starfield.rotation.y += dt * 0.02;
-      this.starfield.rotation.z += dt * 0.005;
+      this.starfield.rotation.y += dt * 0.015;
+      this.starfield.rotation.z += dt * 0.004;
+    }
+    if (this.starfieldUniforms) {
+      this.starfieldUniforms.uTime.value = this.time;
     }
 
-    const driftX = this.simplex.noise3D(this.time * 0.08, 11.3, 0) * 0.45;
-    const driftY = this.simplex.noise3D(0.7, this.time * 0.09, 5.1) * 0.25;
-    const driftZ = this.simplex.noise3D(4.2, 0.5, this.time * 0.06) * 0.3;
-    this.camera.position.x = 0.6 * Math.sin(this.time * 0.12) + driftX;
-    this.camera.position.y = 0.45 + driftY + audio.energy * 0.4;
-    this.camera.position.z = 4.6 + driftZ;
+    const driftX = this.simplex.noise3D(this.time * 0.06, 11.3, 0) * 0.45;
+    const driftY = this.simplex.noise3D(0.7, this.time * 0.08, 5.1) * 0.28;
+    const driftZ = this.simplex.noise3D(4.2, 0.5, this.time * 0.07) * 0.32;
+    this.camera.position.x = 0.45 * Math.sin(this.time * 0.18) + driftX;
+    this.camera.position.y = 0.4 + driftY + audio.energy * 0.35;
+    this.camera.position.z = 4.6 + driftZ - audio.bass * 0.2;
 
-    const pulse = this.peakPulse * 0.6;
-    const fovTarget = 55 + pulse * 1.8;
-    this.camera.fov += (fovTarget - this.camera.fov) * 0.08;
-    this.camera.rotation.z = pulse * 0.035 * Math.sin(this.time * 4.0);
-    this.camera.lookAt(0, 0, 0);
+    const pulse = this.peakPulse;
+    const fovTarget = this.baseFov + pulse * 2.0;
+    this.camera.fov += (fovTarget - this.camera.fov) * 0.1;
+    this.camera.rotation.z = pulse * 0.04 * Math.sin(this.time * 3.5);
+    const lookTargetX = Math.sin(this.time * 0.12) * 0.25;
+    const lookTargetY = audio.energy * 0.25 + this.simplex.noise3D(2.4, this.time * 0.05, 1.1) * 0.1;
+    const lookTargetZ = Math.cos(this.time * 0.1) * 0.25;
+    this.camera.lookAt(lookTargetX, lookTargetY, lookTargetZ);
     this.camera.updateProjectionMatrix();
 
     const renderTarget = this.composer;
@@ -887,6 +1061,7 @@ class AuroraOrbitVisualizer {
       this.starfield.geometry.dispose();
       this.starfield.material.dispose();
       this.starfield = null;
+      this.starfieldUniforms = null;
     }
     for (const ribbon of this.ribbons) {
       ribbon.dispose(this.scene);
