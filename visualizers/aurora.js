@@ -1,4 +1,5 @@
 import * as THREE from '../modules/three.module.js';
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 import {
   EffectComposer,
   RenderPass,
@@ -6,6 +7,7 @@ import {
   FXAAEffect,
   BloomEffect
 } from '../modules/postprocessing.js';
+} from 'https://unpkg.com/postprocessing@6.35.3/build/postprocessing.esm.js';
 
 // Lightweight seeded simplex noise for smooth procedural motion.
 class SimplexNoise {
