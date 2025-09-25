@@ -2,7 +2,12 @@
 // absolute URLs so that this file can run without bundling or
 // installing local modules.  If you wish to host the modules
 // yourself, update these URLs accordingly.
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+// Import Three.js from the same URL that postprocessing uses.  The
+// `?module` suffix instructs unpkg to serve the ES module build and
+// avoids loading a second copy of the library.  This prevents the
+// "Multiple instances of Three.js being imported" warning in the
+// console.
+import * as THREE from 'https://unpkg.com/three@0.160.0?module';
 // Import the entire postprocessing module and then destructure the needed
 // classes.  The `?module` suffix ensures we load the ES module build of
 // postprocessing, which provides named exports.  Importing the
@@ -16,6 +21,15 @@ const {
   FXAAEffect,
   BloomEffect
 } = POSTPROCESSING;
+
+// Expose Three.js on the global object if it is not already set.  The
+// postprocessing module will detect this and reuse the existing
+// instance instead of importing its own copy.  Without this, two
+// separate versions of THREE may coexist, leading to warnings and
+// inconsistent behaviour.
+if (typeof window !== 'undefined' && !window.THREE) {
+  window.THREE = THREE;
+}
 
 /*!
  * Aurora Orbit Visualiser
@@ -777,14 +791,24 @@ export class AuroraOrbitVisualizer {
       const mesh = this.ribbonObjects[i];
       const positions = mesh.geometry.getAttribute('position');
       const colors = mesh.geometry.getAttribute('color');
-      for (let j = 0; j < positions.count / 2; j++) {
+      // Each ribbon consists of `segments` segments, where `curve.length`
+      // equals `segments + 1`.  Our geometry stores 3 vertices per segment
+      // (two at the start and one at the end), so there are `segments * 3`
+      // vertices in total.  Update each segment by assigning the start
+      // vertices to c0 and the end vertex to c1.  This avoids reading
+      // beyond the end of the `curve` array (which caused the previous
+      // TypeError) and matches the attribute layout built in
+      // `buildRibbonGeometry`.
+      const segCount = curve.length - 1;
+      for (let j = 0; j < segCount; j++) {
         const c0 = curve[j];
         const c1 = curve[j + 1];
-        const idx = j * 6;
+        const idx = j * 3;
+        // v0 and v1 (t0,0) and (t0,1)
         positions.setXY(idx + 0, c0.x, c0.y);
-        positions.setXY(idx + 2, c0.x, c0.y);
-        positions.setXY(idx + 4, c1.x, c1.y);
-        positions.setXY(idx + 6, c1.x, c1.y);
+        positions.setXY(idx + 1, c0.x, c0.y);
+        // v2 (t1,0)
+        positions.setXY(idx + 2, c1.x, c1.y);
       }
       positions.needsUpdate = true;
       colors.needsUpdate = true;
