@@ -12,6 +12,9 @@
        aurora.js imports "three" or "postprocessing" it resolves to
        these URLs via the AURORA_VENDOR_MODULES map defined below. -->
   <link rel="modulepreload" href="https://unpkg.com/three@0.160.0/build/three.module.js" />
+  <!-- Preload the ES module build of postprocessing. The `?module` suffix
+       instructs unpkg to serve an ESM build that supports static imports.
+       See https://github.com/pmndrs/postprocessing for details. -->
   <link rel="modulepreload" href="https://unpkg.com/postprocessing@6.35.3?module" />
   <script>
     // Expose a map of vendor module names to absolute URLs.  Our visualiser
@@ -20,6 +23,8 @@
     // copies in the repository.
     window.AURORA_VENDOR_MODULES = {
       three: 'https://unpkg.com/three@0.160.0/build/three.module.js',
+      // Use the ESM build of postprocessing via the `?module` suffix so
+      // named exports like BloomEffect are available.
       postprocessing: 'https://unpkg.com/postprocessing@6.35.3?module'
     };
   </script>
