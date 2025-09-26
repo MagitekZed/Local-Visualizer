@@ -170,6 +170,17 @@ class VisualizerManager {
   }
 
   /**
+   * Toggle between the WebGL and 2D visualisers.  If the current
+   * active type is WebGL we switch to the 2D fallback; otherwise we
+   * attempt to initialise the WebGL visualiser.  The caller should
+   * update any UI labels after calling this method.
+   */
+  toggle() {
+    const preferWebGL = this.activeType !== 'webgl';
+    this._create(preferWebGL);
+  }
+
+  /**
    * Dispose of the current visualiser and reset state.  After calling
    * dispose() you can call init() again to start a new visualiser.
    */
@@ -191,7 +202,10 @@ class VisualizerManager {
   const audioEl = $('#audio');
   const stage = document.querySelector('.stage');
   const playPauseBtn = $('#playPause');
-  const addBtn = $('#btn-add');
+  // There is no longer a top-level "Add Songs" button.  Instead we
+  // provide a clickable link inside the dropzone.  Grab a reference
+  // to that element so we can trigger the hidden file input.
+  const addSongsLink = document.getElementById('addSongsLink');
   const fileInput = $('#fileInput');
   const trackListEl = $('#trackList');
   const dropzone = $('#dropzone');
@@ -201,6 +215,8 @@ class VisualizerManager {
   const cinemaBtn = $('#btn-cinema');
   const exitCinemaBtn = $('#btn-exit-cinema');
   const qualitySel = $('#quality');
+  const prevBtn = document.getElementById('btn-prev');
+  const nextBtn = document.getElementById('btn-next');
 
   // Create the visualiser manager
   const visualizerManager = new VisualizerManager();
@@ -268,6 +284,14 @@ class VisualizerManager {
     // Now that we have an analyser, we can initialise the visualiser manager
     visualizerManager.init(stage, analyser);
     visualizerManager.setQuality(qualitySel.value);
+    // Set the toggle button label to indicate the mode that will be
+    // activated when clicked.  If WebGL is active, show "2D", else
+    // show "3D".  This ensures the button label is correct on
+    // first initialisation.
+    const toggleBtn = document.getElementById('btn-toggle-vis');
+    if (toggleBtn) {
+      toggleBtn.textContent = visualizerManager.activeType === 'webgl' ? '2D' : '3D';
+    }
   }
 
   /**
@@ -280,11 +304,44 @@ class VisualizerManager {
     if (!files.length) return;
     files.forEach((file) => {
       const id = `${file.name}-${file.size}-${file.lastModified}`;
-      // Skip duplicates
+      // Skip duplicates based on ID
       if (STATE.tracks.some((t) => t.id === id)) return;
       const url = URL.createObjectURL(file);
-      STATE.tracks.push({ id, file, name: file.name, url, duration: 0 });
+      // Default metadata: strip extension from file name for the title
+      const defaultTitle = file.name.replace(/\.[^/.]+$/, '');
+      const track = {
+        id,
+        file,
+        url,
+        duration: 0,
+        title: defaultTitle,
+        artist: '',
+        album: ''
+      };
+      STATE.tracks.push(track);
+      // Attempt to read ID3 tags using jsmediatags.  This library is
+      // loaded globally via a script tag in index.html.  We read the
+      // track's metadata asynchronously and update the track object
+      // when available.  If tags are missing we leave the defaults.
+      if (window.jsmediatags) {
+        window.jsmediatags.read(file, {
+          onSuccess: function(tag) {
+            const tags = tag.tags || {};
+            if (tags.title) track.title = tags.title;
+            if (tags.artist) track.artist = tags.artist;
+            if (tags.album) track.album = tags.album;
+            // Re-render the list to show updated metadata
+            renderTrackList();
+          },
+          onError: function(error) {
+            // We ignore metadata errors and keep defaults
+            console.warn('jsmediatags error:', error.type, error.info);
+          }
+        });
+      }
     });
+    // After adding files, re-render the list and ensure the first track
+    // is loaded (without autoplay) if none is currently selected.
     renderTrackList();
     if (STATE.current === -1 && STATE.tracks.length) loadTrack(0, false);
   }
@@ -301,18 +358,34 @@ class VisualizerManager {
       const icon = document.createElement('span');
       icon.textContent = '♪';
       icon.style.opacity = '0.7';
+      // Metadata container holds title and artist/album
       const meta = document.createElement('div');
       meta.className = 'meta';
+      // Title: use track.title if available, otherwise fallback to name
       const title = document.createElement('div');
       title.className = 'title';
-      title.textContent = t.name;
+      title.textContent = t.title || t.name;
+      // Artist/album line.  Show both if available; if no metadata,
+      // leave blank so the time can be shown instead.
       const sub = document.createElement('div');
       sub.className = 'sub';
-      sub.textContent = t.duration ? fmtTime(t.duration) : '—:—';
+      if (t.artist || t.album) {
+        const artist = t.artist || '';
+        const album = t.album || '';
+        sub.textContent = `${artist}${artist && album ? ' – ' : ''}${album}`;
+      } else {
+        sub.textContent = '';
+      }
       meta.appendChild(title);
       meta.appendChild(sub);
       li.appendChild(icon);
       li.appendChild(meta);
+      // Duration/time indicator on the right.  Only show if we know the
+      // duration (i.e. metadata loaded).  If not loaded yet, leave empty.
+      const timeSpan = document.createElement('div');
+      timeSpan.className = 'time';
+      timeSpan.textContent = t.duration ? fmtTime(t.duration) : '';
+      li.appendChild(timeSpan);
       li.addEventListener('click', () => loadTrack(i, true));
       trackListEl.appendChild(li);
     });
@@ -391,6 +464,26 @@ class VisualizerManager {
     audioEl.volume = v;
   });
 
+  // Navigate to the previous track in the list.  If we're at the first
+  // track, wrap around to the last.  We respect the current track
+  // order stored in STATE.tracks.
+  if (prevBtn) {
+    prevBtn.addEventListener('click', () => {
+      if (!STATE.tracks.length) return;
+      const prevIndex = STATE.current > 0 ? STATE.current - 1 : STATE.tracks.length - 1;
+      loadTrack(prevIndex, true);
+    });
+  }
+  // Navigate to the next track in the list.  If we're at the last
+  // track, wrap around to the first.
+  if (nextBtn) {
+    nextBtn.addEventListener('click', () => {
+      if (!STATE.tracks.length) return;
+      const nextIndex = (STATE.current + 1) % STATE.tracks.length;
+      loadTrack(nextIndex, true);
+    });
+  }
+
   // Seek bar
   seekEl.addEventListener('input', () => {
     const t = STATE.tracks[STATE.current];
@@ -429,9 +522,19 @@ class VisualizerManager {
     if (dt && dt.files) addFiles(dt.files);
   });
 
-  // Add songs button
-  addBtn.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => addFiles(e.target.files));
+  // Clicking the "Add Songs" link (inside the dropzone) triggers
+  // the hidden file input.  When files are selected, we add them
+  // to the library.  The file input remains hidden in the DOM.
+  if (addSongsLink) {
+    addSongsLink.addEventListener('click', () => {
+      fileInput.click();
+    });
+  }
+  fileInput.addEventListener('change', (e) => {
+    addFiles(e.target.files);
+    // Reset the value so the same file can be re‑added if needed
+    fileInput.value = '';
+  });
 
   // Cinema mode toggles a full‑screen experience.  We simply toggle a
   // class on the body; CSS handles resizing.  When entering, reset
@@ -464,6 +567,27 @@ class VisualizerManager {
     STATE.quality = qualitySel.value;
     visualizerManager.setQuality(STATE.quality);
   });
+
+  // Toggle between 3D (WebGL) and 2D (Canvas) visualisers.  When the
+  // user clicks the toggle button we swap the implementation and
+  // update the button label to reflect the next mode.  After
+  // switching we explicitly resize the visualiser to fit the stage.
+  const toggleBtn = document.getElementById('btn-toggle-vis');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      // Flip the active visualiser type
+      visualizerManager.toggle();
+      // Update the button text: if WebGL is now active, show "2D"; else "3D"
+      if (visualizerManager.activeType === 'webgl') {
+        toggleBtn.textContent = '2D';
+      } else {
+        toggleBtn.textContent = '3D';
+      }
+      // Resize after toggling to ensure canvas fits
+      const rect = stage.getBoundingClientRect();
+      visualizerManager.resize(rect.width, rect.height);
+    });
+  }
 
   /**
    * Main animation loop.  On each frame we collect frequency and time
