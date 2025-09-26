@@ -253,7 +253,8 @@ export class AuroraOrbitVisualizer {
       // Set up scene and camera
       this.scene = new THREE.Scene();
       this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-      this.camera.position.set(0, 0.6, 5.5);
+      // Position the camera back a bit further and slightly lower.
+      this.camera.position.set(0, 0.5, 6.0);
       this.camera.lookAt(0, 0, 0);
       // Build starfield and bars
       this._buildStarfield();
@@ -327,9 +328,10 @@ export class AuroraOrbitVisualizer {
       geometry.translate(0, 0.5, 0);
       const material = new THREE.MeshBasicMaterial({ color: color });
       const bar = new THREE.Mesh(geometry, material);
-      // Position the bar around a circle of radius 2.8
+      // Position the bar around a circle of radius 2.5.  A slightly
+      // smaller radius keeps the bars fully visible within the frame.
       const angle = t * Math.PI * 2;
-      const radius = 2.8;
+      const radius = 2.5;
       bar.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
       // Orient the bar so it faces the centre
       bar.lookAt(0, 0, 0);
@@ -411,7 +413,14 @@ export class AuroraOrbitVisualizer {
     for (let i = 0; i < this.bars.length; i++) {
       const mesh = this.bars[i];
       const a = amplitudes[i];
-      const scaleY = 0.2 + 2.6 * a; // scale height between 0.2 and 2.8
+      // Scale the bar's height based on the current amplitude.  The
+      // previous implementation used a very large scaling factor which
+      // caused the bars to spill out of the viewport.  We reduce the
+      // dynamic range so that the ring remains comfortably framed in
+      // the stage: when a = 0 the bar height is 0.4 units; when a = 1
+      // the bar height reaches 1.9 units.  You can tweak these
+      // constants to suit your taste.
+      const scaleY = 0.4 + 1.5 * a;
       mesh.scale.setY(scaleY);
     }
     // Rotate the ring slowly.  Energy modulates speed.
@@ -424,9 +433,11 @@ export class AuroraOrbitVisualizer {
     // Camera drift: subtle sinusoidal motion to avoid static view
     const t = now / 1000;
     const drift = 0.04;
+    // Drift the camera slowly around its base position.  Base values
+    // adjusted to frame the entire ring comfortably within the view.
     this.camera.position.x = Math.sin(t * drift) * 0.2;
-    this.camera.position.y = 0.6 + Math.sin(t * drift * 1.3) * 0.1;
-    this.camera.position.z = 5.5 + Math.cos(t * drift * 0.9) * 0.2;
+    this.camera.position.y = 0.5 + Math.sin(t * drift * 1.3) * 0.1;
+    this.camera.position.z = 6.0 + Math.cos(t * drift * 0.9) * 0.2;
     this.camera.lookAt(0, 0, 0);
     // Render the scene
     this.renderer.render(this.scene, this.camera);
@@ -481,4 +492,4 @@ export class AuroraOrbitVisualizer {
     this.container = null;
     this.bandMap = null;
   }
-                       }
+}
