@@ -16,7 +16,7 @@
   <header class="app-header">
     <h1>Local Jukebox<span class="dot">•</span>Visualizer</h1>
     <div class="controls">
-      <button id="btn-add" class="btn">Add Songs</button>
+      <!-- Removed top Add Songs button; file input remains hidden -->
       <input id="fileInput" type="file" accept="audio/*" multiple hidden />
       <button id="btn-cinema" class="btn">Cinema Mode</button>
       <!-- Toggle between 3D (WebGL) and 2D (Canvas) visualisers -->
@@ -34,7 +34,9 @@
   <main class="app-main">
     <aside class="sidebar" id="library">
       <div class="dropzone" id="dropzone">
-        <p>Drag &amp; drop audio files here<br /><small>…or click “Add Songs”</small></p>
+        <p>Drag &amp; drop audio files here<br />
+          <small>…or click <span id="addSongsLink" class="add-songs-link">Add Songs</span></small>
+        </p>
       </div>
       <ul id="trackList" class="track-list"></ul>
     </aside>
@@ -43,7 +45,9 @@
            when the WebGL visualiser is active. -->
       <canvas id="vis"></canvas>
       <div class="transport" id="transport">
+        <button id="btn-prev" class="btn small" title="Previous track">⏮</button>
         <button id="playPause" class="btn big">Play</button>
+        <button id="btn-next" class="btn small" title="Next track">⏭</button>
         <input id="seek" type="range" min="0" max="1" step="0.001" value="0" />
         <span id="time">0:00 / 0:00</span>
         <label class="vol">
@@ -59,6 +63,8 @@
     <small>All processing happens locally in your browser. Nothing is uploaded.</small>
   </footer>
   <audio id="audio" crossorigin="anonymous"></audio>
+  <!-- Load jsmediatags library for reading ID3 tags -->
+  <script src="https://cdn.jsdelivr.net/npm/jsmediatags@3.9.5/dist/jsmediatags.min.js"></script>
   <!-- Load our application as an ES module.  This script bootstraps the audio
        player and visualiser manager, then hands off control to AuroraOrbit. -->
   <script type="module" src="app.js"></script>
