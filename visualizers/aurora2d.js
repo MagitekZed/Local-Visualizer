@@ -92,13 +92,17 @@ export class AuroraOrbit2DVisualizer {
     this.bgGradient.addColorStop(0, '#041021');
     this.bgGradient.addColorStop(0.6, '#09192e');
     this.bgGradient.addColorStop(1, '#120920');
+    // Position the radial gradient slightly below centre.  Placing
+    // both the radial glow and the circular spectrum lower in the
+    // canvas helps to frame the visualiser closer to the player bar.
     const r = Math.min(this.width, this.height) * 0.52;
+    const cy = this.height * 0.55;
     this.radialGradient = ctx.createRadialGradient(
       this.width / 2,
-      this.height / 2,
+      cy,
       r * 0.2,
       this.width / 2,
-      this.height / 2,
+      cy,
       r
     );
     this.radialGradient.addColorStop(0, 'rgba(34,68,120,0.6)');
@@ -183,7 +187,10 @@ export class AuroraOrbit2DVisualizer {
     ctx.fillStyle = this.radialGradient;
     ctx.fillRect(0, 0, w, h);
     const cx = w / 2;
-    const cy = h / 2;
+    // Move the circle downward so it sits closer to the bottom of
+    // the stage.  This aligns with the 3D visualiser, leaving more
+    // breathing room above.  The factor 0.55 was chosen empirically.
+    const cy = h * 0.55;
     const maxR = Math.min(w, h) * 0.45;
     // Draw circular spectrum
     ctx.save();
@@ -217,20 +224,28 @@ export class AuroraOrbit2DVisualizer {
       ctx.shadowBlur = 0;
     }
     ctx.restore();
-    // Draw sparkles around the circle
-    const sparkRadius = maxR * 0.78;
+    // Draw dynamic sparkles orbiting the circle.  Each seed advances
+    // over time at a rate influenced by the high-frequency energy.
+    // Instead of placing static dots we animate them smoothly around
+    // the ring.  This creates a lively accent that responds to
+    // hi-hats and sibilants.
+    const sparkRadius = maxR * 0.8;
     ctx.beginPath();
     for (let i = 0; i < this.sparkSeeds.length; i++) {
-      const seed = this.sparkSeeds[i];
-      const t = (seed + this.audioState.energy * dt * 0.1) % 1.0;
-      const angle = t * Math.PI * 2;
-      const r = sparkRadius + Math.sin(t * Math.PI * 4) * 4;
-      const x = cx + Math.cos(angle) * r;
-      const y = cy + Math.sin(angle) * r;
+      // Advance each seed by a base speed plus a component from highs
+      const speed = 0.08 + this.audioState.highs * 0.5;
+      this.sparkSeeds[i] = (this.sparkSeeds[i] + dt * speed) % 1.0;
+      const tSpark = this.sparkSeeds[i];
+      const angle = tSpark * Math.PI * 2;
+      const x = cx + Math.cos(angle) * sparkRadius;
+      const y = cy + Math.sin(angle) * sparkRadius;
       ctx.moveTo(x, y);
       ctx.arc(x, y, 1.5, 0, Math.PI * 2);
     }
-    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    // Colour sparkles based on high frequency energy: brighter
+    // sparkles when highs are strong.
+    const sparkleAlpha = 0.5 + this.audioState.highs * 0.5;
+    ctx.fillStyle = `rgba(255,255,255,${sparkleAlpha.toFixed(2)})`;
     ctx.fill();
   }
   dispose() {
