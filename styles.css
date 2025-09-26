@@ -65,24 +65,66 @@ h1 .dot{ color: var(--accent); margin: 0 6px; }
   list-style: none; padding: 0; margin: 8px 0 0 0; overflow: auto; flex: 1 1 auto; min-height: 0;
 }
 .track-list li{
-  display:flex; align-items:center; gap: 10px;
-  padding: 10px 12px; margin: 0 8px 8px; border-radius: 10px; background: var(--card);
-  border:1px solid #1f2632; cursor: pointer;
+  display:flex;
+  align-items:center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 0 8px 8px;
+  border-radius: 10px;
+  background: var(--card);
+  border:1px solid #1f2632;
+  cursor: pointer;
+}
+
+/* Add top margin for the first track so its highlight isn't clipped */
+.track-list li:first-child {
+  margin-top: 12px;
+}
+
+/* Style for the Add Songs link inside the dropzone */
+.add-songs-link {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.add-songs-link:hover {
+  color: var(--accent2);
 }
 .track-list li.active{ outline: 2px solid var(--accent); }
 .track-list .meta{ display:flex; flex-direction:column; gap:2px; }
 .track-list .title{ font-size: 14px; color: #e6eef9; }
 .track-list .sub{ font-size: 12px; color: var(--muted); }
 
+/* Duration indicator in the track list.  Align it to the far right and
+   use a muted colour similar to other metadata. */
+.track-list .time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .stage{ position: relative; background: #07090c; height: 100%; min-height: 0; overflow: hidden; }
 #vis{ width: 100%; height: 100%; display: block; }
 
 .transport{
-  position: absolute; left: 12px; right: 12px; bottom: 12px;
-  background: rgba(10,12,16,0.75); backdrop-filter: blur(6px);
-  border: 1px solid #1f2632; border-radius: 12px; padding: 8px; display:flex; align-items:center; gap:10px;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 12px;
+  width: min(720px, 92vw);
+  background: rgba(10,12,16,0.75);
+  backdrop-filter: blur(6px);
+  border: 1px solid #1f2632;
+  border-radius: 12px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-.transport input[type="range"]{ width: 40%; }
+
+.transport input[type="range"]{
+  width: 40%;
+}
 .vol{ display:flex; align-items:center; gap:6px; color: var(--muted); font-size: 12px; }
 #time{ font-variant-numeric: tabular-nums; color: #c9d6e6; }
 
