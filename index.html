@@ -6,13 +6,11 @@
   <title>Local Jukebox + Visualizer</title>
   <!-- Site styling -->
   <link rel="stylesheet" href="styles.css" />
-  <!-- Preload vendor modules from a CDN.  We pull Three.js and the
-       postprocessing library directly from unpkg.  Using `modulepreload`
-       hints to the browser to fetch these ES modules early.  We use
-       the `?module` suffix for both libraries so they resolve to the
-       same module instance when imported. -->
+  <!-- Preload Three.js from a CDN.  The `?module` suffix ensures
+       the ES module version is fetched.  We no longer preload
+       postprocessing because the 3D visualiser does not depend
+       on it.  -->
   <link rel="modulepreload" href="https://unpkg.com/three@0.160.0?module" />
-  <link rel="modulepreload" href="https://unpkg.com/postprocessing@6.35.3?module" />
 </head>
 <body>
   <header class="app-header">
@@ -21,6 +19,8 @@
       <button id="btn-add" class="btn">Add Songs</button>
       <input id="fileInput" type="file" accept="audio/*" multiple hidden />
       <button id="btn-cinema" class="btn">Cinema Mode</button>
+      <!-- Toggle between 3D (WebGL) and 2D (Canvas) visualisers -->
+      <button id="btn-toggle-vis" class="btn" title="Switch between 3D and 2D visualisers">3D</button>
       <label class="select-wrap">
         <span>Quality</span>
         <select id="quality">
