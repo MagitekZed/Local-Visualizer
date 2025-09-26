@@ -127,6 +127,10 @@ function buildStarfield(count, radius) {
     `,
     fragmentShader: /* glsl */`
       precision mediump float;
+      // Declare uTime so it is recognised by the shader.  Without
+      // declaring it here the compiler reports "uTime" as an
+      // undeclared identifier.  See console errors.
+      uniform float uTime;
       uniform vec3 uColor;
       uniform float uBrightness;
       varying float vSeed;
@@ -341,6 +345,12 @@ export class AuroraOrbitVisualizer {
     this.scene.add(this.barsGroup);
     // Reset band map so it will be recomputed on next update
     this.bandMap = null;
+
+    // Move the entire ring downward slightly so that it sits closer
+    // to the bottom of the stage.  Without this offset the ring
+    // appears too high in the frame, leaving awkward empty space
+    // below.  Adjust this value if you change bar scaling.
+    this.barsGroup.position.y = -0.6;
   }
 
   /**
