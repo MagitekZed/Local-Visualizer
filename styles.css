@@ -38,7 +38,15 @@ h1 .dot{ color: var(--accent); margin: 0 6px; }
   color: var(--fg); border: 1px solid #2a3446; border-radius: 10px;
   padding: 8px 12px; cursor: pointer; box-shadow: var(--glow);
 }
-.btn.big{ padding: 10px 16px; font-weight: 600; }
+.btn.big{
+  padding: 10px 16px;
+  font-weight: 600;
+  /* Keep a constant width so the play/pause button does not change
+     size when its label changes.  Centre the text horizontally. */
+  min-width: 66px;
+  display: inline-flex;
+  justify-content: center;
+}
 .btn:hover{ border-color: #3b4860; }
 .select-wrap{ display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted);}  
 .select-wrap select{
