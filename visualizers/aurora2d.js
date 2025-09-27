@@ -20,7 +20,10 @@ export class AuroraOrbit2DVisualizer {
     this.sampleRate = 44100;
     this.bandMap = null;
     this.barValues = new Float32Array(128);
-    this.sparkSeeds = new Float32Array(128);
+    // Seeds controlling the phase of each radial ray.  The number of
+    // rays will be set in setQuality().  For now initialise with
+    // default sparkCount from settings.
+    this.raySeeds = new Float32Array(this.settings.sparkCount);
     this.audioState = {
       energy: 0,
       bass: 0,
@@ -32,8 +35,16 @@ export class AuroraOrbit2DVisualizer {
     this.bgGradient = null;
     this.radialGradient = null;
     this.lastHue = Math.random();
-    for (let i = 0; i < this.sparkSeeds.length; i++) {
-      this.sparkSeeds[i] = Math.random();
+    // Default palette colours used when no album art palette is provided.
+    // Each entry is an sRGB triplet (0..1).  These roughly match the
+    // turquoise, purple and magenta hues used in the 3D visualiser.
+    this.paletteColors = [
+      [0.0, 0.7, 0.9], // turquoise-ish
+      [0.6, 0.2, 0.8], // purple-ish
+      [1.0, 0.2, 0.5]  // magenta-ish
+    ];
+    for (let i = 0; i < this.raySeeds.length; i++) {
+      this.raySeeds[i] = Math.random();
     }
   }
   setQuality(level) {
@@ -46,11 +57,36 @@ export class AuroraOrbit2DVisualizer {
     this.quality = level;
     this.settings = presets[level];
     this.barValues = new Float32Array(this.settings.bars);
-    this.sparkSeeds = new Float32Array(this.settings.sparkCount);
-    for (let i = 0; i < this.sparkSeeds.length; i++) {
-      this.sparkSeeds[i] = Math.random();
+    // Resize the raySeeds array based on the desired sparkCount.  Each
+    // seed controls a radial ray for the high-frequency effect.
+    this.raySeeds = new Float32Array(this.settings.sparkCount);
+    for (let i = 0; i < this.raySeeds.length; i++) {
+      this.raySeeds[i] = Math.random();
     }
     this.bandMap = null;
+  }
+
+  /**
+   * Update the colour palette used for the circular spectrum.  Accepts an
+   * array of three sRGB colours (range 0..1).  These colours are
+   * interpolated across the bars.  If fewer than three colours are
+   * provided, the last colour is repeated.
+   *
+   * @param {Array<Array<number>>} palette Array of colours
+   */
+  setPalette(palette) {
+    if (!palette || !palette.length) return;
+    // Ensure at least three colours
+    const cols = [];
+    for (let i = 0; i < 3; i++) {
+      const col = palette[i] || palette[palette.length - 1];
+      cols.push([
+        Math.min(1, Math.max(0, col[0])),
+        Math.min(1, Math.max(0, col[1])),
+        Math.min(1, Math.max(0, col[2]))
+      ]);
+    }
+    this.paletteColors = cols;
   }
   init(container, analyser) {
     this.container = container;
@@ -198,16 +234,34 @@ export class AuroraOrbit2DVisualizer {
     // Reduce the maximum radius slightly to maintain margins on all
     // sides.  This keeps the spectrum fully visible within the stage.
     const maxR = Math.min(w, h) * 0.42;
-    // Draw circular spectrum
+    // Draw circular spectrum using palette-based colours.  We
+    // interpolate between the three palette colours across the
+    // spectrum.  Bars are drawn as thick arcs with a subtle glow.
     ctx.save();
     ctx.translate(cx, cy);
     const bars = this.settings.bars;
     const glow = this.settings.glow;
-    const sparkCount = this.settings.sparkCount;
     const angleStep = (Math.PI * 2) / bars;
-    // Draw arcs with gradient and glow
     for (let i = 0; i < bars; i++) {
       const v = this.barValues[i];
+      // Compute colour by interpolating between palette colours.  t
+      // ranges from 0..1 across bars.  There are two segments: 0..0.5
+      // maps palette[0]→palette[1], 0.5..1 maps palette[1]→palette[2].
+      const t = i / (bars - 1);
+      const seg = t < 0.5 ? 0 : 1;
+      const segT = seg === 0 ? (t / 0.5) : ((t - 0.5) / 0.5);
+      const c0 = this.paletteColors[seg];
+      const c1 = this.paletteColors[seg + 1];
+      const r = c0[0] + (c1[0] - c0[0]) * segT;
+      const g = c0[1] + (c1[1] - c0[1]) * segT;
+      const b = c0[2] + (c1[2] - c0[2]) * segT;
+      // Apply brightness based on overall energy; clamp to [0,1]
+      const brightness = 0.7 + 0.3 * this.audioState.energy;
+      const fr = Math.min(1, r * brightness);
+      const fg = Math.min(1, g * brightness);
+      const fb = Math.min(1, b * brightness);
+      const fillStyle = `rgb(${Math.round(fr * 255)},${Math.round(fg * 255)},${Math.round(fb * 255)})`;
+      const glowStyle = `rgba(${Math.round(fr * 255)},${Math.round(fg * 255)},${Math.round(fb * 255)},0.7)`;
       const a0 = i * angleStep;
       const a1 = a0 + angleStep * 0.9;
       const r0 = maxR * 0.5;
@@ -216,52 +270,39 @@ export class AuroraOrbit2DVisualizer {
       ctx.arc(0, 0, r1, a0, a1, false);
       ctx.arc(0, 0, r0, a1, a0, true);
       ctx.closePath();
-      // Hue rotates slowly with energy
-      this.lastHue = (this.lastHue + this.audioState.energy * 0.03 * dt) % 1.0;
-      const hue = ((i / bars) + this.lastHue) % 1.0;
-      const saturation = 0.7 + 0.25 * this.audioState.bass;
-      const lightness = 0.5 + 0.2 * this.audioState.mids;
-      ctx.fillStyle = `hsl(${hue * 360}, ${saturation * 100}%, ${lightness * 50 + 25}%)`;
-      ctx.fill();
-      // Glow
+      ctx.fillStyle = fillStyle;
       ctx.shadowBlur = glow;
-      ctx.shadowColor = `hsl(${hue * 360}, 80%, 60%)`;
+      ctx.shadowColor = glowStyle;
       ctx.fill();
       ctx.shadowBlur = 0;
     }
     ctx.restore();
-    // Draw dynamic sparkles orbiting the circle.  Each seed advances
+    // Draw dynamic rays orbiting the circle.  Each seed advances
     // over time at a rate influenced by the high-frequency energy.
-    // Instead of placing static dots we animate them smoothly around
-    // the ring.  This creates a lively accent that responds to
-    // hi-hats and sibilants.
-    // Draw dynamic sparkles orbiting the circle.  Each seed advances
-    // over time at a rate influenced by the high‑frequency energy.
-    // We render larger spark pulses whose size and brightness scale
-    // with the highs.  The sparks orbit at an angle determined by
-    // their seed and a global rotation.  A wider radius emphasises
-    // their separation from the main ring.
-    const sparkRadius = maxR * 0.85;
-    // Precompute size and alpha based on highs.  A small base size
-    // ensures sparks are always visible; highs boost both size and
-    // brightness.
-    // Base size slightly larger and allow highs to boost size more
-    const sparkSize = 2.0 + this.audioState.highs * 4.0;
-    // Make sparkles more luminous at high energy while retaining a
-    // visible base alpha when quiet
-    const sparkleAlpha = 0.4 + this.audioState.highs * 0.8;
-    for (let i = 0; i < this.sparkSeeds.length; i++) {
+    // We render radial strokes whose length and brightness scale
+    // with the highs.  The rays orbit at an angle determined by
+    // their seed value.
+    const rayRadius = maxR * 0.72;
+    const baseLength = maxR * 0.08;
+    const high = this.audioState.highs;
+    for (let i = 0; i < this.raySeeds.length; i++) {
       // Advance each seed by a base speed plus a component from highs.
-      const speed = 0.05 + this.audioState.highs * 0.6;
-      this.sparkSeeds[i] = (this.sparkSeeds[i] + dt * speed) % 1.0;
-      const tSpark = this.sparkSeeds[i];
-      const angle = tSpark * Math.PI * 2;
-      const x = cx + Math.cos(angle) * sparkRadius;
-      const y = cy + Math.sin(angle) * sparkRadius;
+      const speed = 0.05 + high * 0.6;
+      this.raySeeds[i] = (this.raySeeds[i] + dt * speed) % 1.0;
+      const tRay = this.raySeeds[i];
+      const angle = tRay * Math.PI * 2;
+      const length = baseLength + high * maxR * 0.12;
+      const x0 = cx + Math.cos(angle) * rayRadius;
+      const y0 = cy + Math.sin(angle) * rayRadius;
+      const x1 = cx + Math.cos(angle) * (rayRadius + length);
+      const y1 = cy + Math.sin(angle) * (rayRadius + length);
       ctx.beginPath();
-      ctx.arc(x, y, sparkSize, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255,255,255,${sparkleAlpha.toFixed(2)})`;
-      ctx.fill();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      const alpha = 0.3 + high * 0.7;
+      ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+      ctx.lineWidth = 1.0 + high * 2.5;
+      ctx.stroke();
     }
   }
   dispose() {

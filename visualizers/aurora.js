@@ -216,6 +216,48 @@ export class AuroraOrbitVisualizer {
     }
   }
 
+  /**
+   * Update the colour palette used by the bar gradient.  Accepts an
+   * array of three sRGB colours (0..1).  These colours replace the
+   * HSL gradient stops defined at the top of this file.  The first
+   * three gradient stops are set to the palette colours and the
+   * fourth stop wraps back to the first colour.  Colours are
+   * converted to linear space and stored in the global
+   * gradientColors array.  After updating the palette the bars are
+   * rebuilt so the new colours take effect.
+   *
+   * @param {Array<Array<number>>} palette Array of sRGB colours
+   */
+  setPalette(palette) {
+    if (!palette || !palette.length) return;
+    // Ensure exactly three colours by repeating the last if fewer
+    const cols = [];
+    for (let i = 0; i < 3; i++) {
+      const col = palette[i] || palette[palette.length - 1];
+      cols.push([
+        Math.min(1, Math.max(0, col[0])),
+        Math.min(1, Math.max(0, col[1])),
+        Math.min(1, Math.max(0, col[2]))
+      ]);
+    }
+    // Build four stops: three palette colours and wrap back to first
+    const stops = [cols[0], cols[1], cols[2], cols[0]];
+    for (let i = 0; i < stops.length; i++) {
+      const [r, g, b] = stops[i];
+      // Convert sRGB to linear (approximate gamma 2.2)
+      const lr = Math.pow(r, 2.2);
+      const lg = Math.pow(g, 2.2);
+      const lb = Math.pow(b, 2.2);
+      gradientColors[i * 3 + 0] = lr;
+      gradientColors[i * 3 + 1] = lg;
+      gradientColors[i * 3 + 2] = lb;
+    }
+    // Rebuild bars with new colours
+    if (this.barsGroup) {
+      this._buildBars();
+    }
+  }
+
   /** Initialise the visualiser.  Creates the renderer, scene and
    * camera, attaches the renderer's canvas to the container, and
    * constructs the initial bars and starfield.  If WebGL fails, an
