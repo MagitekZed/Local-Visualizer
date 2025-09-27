@@ -245,8 +245,11 @@ export class AuroraOrbit2DVisualizer {
     // Precompute size and alpha based on highs.  A small base size
     // ensures sparks are always visible; highs boost both size and
     // brightness.
-    const sparkSize = 1.5 + this.audioState.highs * 3.0;
-    const sparkleAlpha = 0.3 + this.audioState.highs * 0.7;
+    // Base size slightly larger and allow highs to boost size more
+    const sparkSize = 2.0 + this.audioState.highs * 4.0;
+    // Make sparkles more luminous at high energy while retaining a
+    // visible base alpha when quiet
+    const sparkleAlpha = 0.4 + this.audioState.highs * 0.8;
     for (let i = 0; i < this.sparkSeeds.length; i++) {
       // Advance each seed by a base speed plus a component from highs.
       const speed = 0.05 + this.audioState.highs * 0.6;

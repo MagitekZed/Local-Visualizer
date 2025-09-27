@@ -352,7 +352,10 @@ export class AuroraOrbitVisualizer {
     // below.  Adjust this value if you change bar scaling.
     // Position the ring slightly lower so it appears centred between
     // the header and player bar.  This offset can be tuned to taste.
-    this.barsGroup.position.y = -0.4;
+    // Raise the ring slightly higher so the bars occupy more of the
+    // vertical space.  A value around -0.3 balances the ring between
+    // the header and player bar.
+    this.barsGroup.position.y = -0.3;
   }
 
   /**
