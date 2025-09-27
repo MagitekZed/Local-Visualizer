@@ -46,6 +46,13 @@ export class AuroraOrbit2DVisualizer {
       [0.6, 0.2, 0.8], // purple-ish
       [1.0, 0.2, 0.5]  // magenta-ish
     ];
+    // Track a pulse for the inner electric ring.  This value
+    // accumulates energy peaks and decays over time to create
+    // flashing effects on high-energy moments.  The innerPhase
+    // controls rotation of secondary decorations such as starburst
+    // lines drawn inside the ring.
+    this.ringPulse = 0;
+    this.innerPhase = 0;
     for (let i = 0; i < this.raySeeds.length; i++) {
       this.raySeeds[i] = Math.random();
     }
@@ -236,7 +243,10 @@ export class AuroraOrbit2DVisualizer {
     const cy = h * 0.5;
     // Reduce the maximum radius slightly to maintain margins on all
     // sides.  This keeps the spectrum fully visible within the stage.
-    const maxR = Math.min(w, h) * 0.42;
+    // Increase the maximum radius so that the ring occupies more of
+    // the available space.  Using 0.48 ensures a generous margin
+    // around the spectrum while allowing room for the inner effect.
+    const maxR = Math.min(w, h) * 0.48;
     // Draw circular spectrum using palette-based colours.  We
     // interpolate between the three palette colours across the
     // spectrum.  Bars are drawn as thick arcs with a subtle glow.
@@ -267,8 +277,13 @@ export class AuroraOrbit2DVisualizer {
       const glowStyle = `rgba(${Math.round(fr * 255)},${Math.round(fg * 255)},${Math.round(fb * 255)},0.7)`;
       const a0 = i * angleStep;
       const a1 = a0 + angleStep * 0.9;
-      const r0 = maxR * 0.5;
-      const r1 = maxR * (0.55 + v * 0.45);
+      // Draw thicker bars starting closer to the centre.  The inner
+      // radius is reduced to 0.40 of maxR and the outer radius
+      // extends proportionally with the bar value up to almost the
+      // full maxR.  This enlarges the ring and leaves space for
+      // a central effect.
+      const r0 = maxR * 0.40;
+      const r1 = maxR * (0.40 + v * 0.60);
       ctx.beginPath();
       ctx.arc(0, 0, r1, a0, a1, false);
       ctx.arc(0, 0, r0, a1, a0, true);
@@ -280,31 +295,49 @@ export class AuroraOrbit2DVisualizer {
       ctx.shadowBlur = 0;
     }
     ctx.restore();
-    // Draw dynamic rays orbiting the circle.  Each seed advances
-    // over time at a rate influenced by the high-frequency energy.
-    // We render radial strokes whose length and brightness scale
-    // with the highs.  The rays orbit at an angle determined by
-    // their seed value.
-    const rayRadius = maxR * 0.72;
-    const baseLength = maxR * 0.08;
-    const high = this.audioState.highs;
-    for (let i = 0; i < this.raySeeds.length; i++) {
-      // Advance each seed by a base speed plus a component from highs.
-      const speed = 0.05 + high * 0.6;
-      this.raySeeds[i] = (this.raySeeds[i] + dt * speed) % 1.0;
-      const tRay = this.raySeeds[i];
-      const angle = tRay * Math.PI * 2;
-      const length = baseLength + high * maxR * 0.12;
-      const x0 = cx + Math.cos(angle) * rayRadius;
-      const y0 = cy + Math.sin(angle) * rayRadius;
-      const x1 = cx + Math.cos(angle) * (rayRadius + length);
-      const y1 = cy + Math.sin(angle) * (rayRadius + length);
+    // Update the pulse for the inner electric ring.  Peaks in the
+    // overall energy cause this value to spike briefly, then it
+    // decays over time.  Squaring the energy emphasises strong
+    // peaks while ignoring low-level noise.
+    this.ringPulse = this.ringPulse * 0.92 + this.audioState.energy * this.audioState.energy * 0.08;
+    // Advance an internal phase used for animating starburst lines.
+    // High-frequency energy increases the rotation speed slightly.
+    this.innerPhase = (this.innerPhase + dt * (0.2 + this.audioState.highs * 0.3)) % 1.0;
+    // Draw an inner electric ring that flashes and widens with the
+    // pulse.  Its radius sits well inside the bar ring, leaving
+    // space for bars and providing a focal point in the centre.
+    const ringRadius = maxR * 0.26;
+    const ringThickness = maxR * (0.04 + this.ringPulse * 0.08);
+    const col = this.paletteColors[1];
+    const ringBrightness = 0.5 + this.ringPulse * 0.6;
+    const rr = Math.min(1, col[0] * ringBrightness);
+    const rg = Math.min(1, col[1] * ringBrightness);
+    const rb = Math.min(1, col[2] * ringBrightness);
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringRadius + ringThickness, 0, Math.PI * 2);
+    ctx.arc(cx, cy, ringRadius, Math.PI * 2, 0, true);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(${Math.round(rr * 255)},${Math.round(rg * 255)},${Math.round(rb * 255)},0.9)`;
+    ctx.shadowBlur = this.settings.glow * 1.5;
+    ctx.shadowColor = `rgba(${Math.round(rr * 255)},${Math.round(rg * 255)},${Math.round(rb * 255)},0.7)`;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    // Draw rotating starburst lines emanating from the inner ring.  The
+    // number of lines and their properties can be tuned to taste.
+    const starCount = 8;
+    for (let j = 0; j < starCount; j++) {
+      const angle = (j / starCount + this.innerPhase) * Math.PI * 2;
+      const length = ringThickness * 1.2 + this.audioState.highs * maxR * 0.05;
+      const xStart = cx + Math.cos(angle) * ringRadius;
+      const yStart = cy + Math.sin(angle) * ringRadius;
+      const xEnd = cx + Math.cos(angle) * (ringRadius + length);
+      const yEnd = cy + Math.sin(angle) * (ringRadius + length);
       ctx.beginPath();
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
-      const alpha = 0.3 + high * 0.7;
-      ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
-      ctx.lineWidth = 1.0 + high * 2.5;
+      ctx.moveTo(xStart, yStart);
+      ctx.lineTo(xEnd, yEnd);
+      const starAlpha = 0.4 + this.ringPulse * 0.6;
+      ctx.strokeStyle = `rgba(${Math.round(rr * 255)},${Math.round(rg * 255)},${Math.round(rb * 255)},${starAlpha.toFixed(2)})`;
+      ctx.lineWidth = 1.0 + this.audioState.highs * 2.0;
       ctx.stroke();
     }
   }

@@ -199,6 +199,21 @@ export class AuroraOrbitVisualizer {
     this.audioState = { energy: 0 };
     this.contextLostHandler = null;
     this.resizeObserver = null;
+    // Additional properties for floor disc, background and peak highlights
+    this.floor = null;
+    // Base colour and highlight colour used for the floor disc.  They
+    // are initialised when the floor is built and updated when
+    // applying palettes.  We store linear colours here for fast
+    // interpolation in update().
+    this.floorBaseColor = new THREE.Color();
+    this.floorHighlightColor = new THREE.Color();
+    // Per-bar peak array tracks highlight intensity per bar.  Values
+    // decay over time and are boosted when a bar exceeds the
+    // highlight threshold.  This array is created in _buildBars().
+    this.barPeak = [];
+    // Background group holds subtle decorative elements that rotate
+    // slowly to add motion to the scene.  Built in _buildBackground().
+    this.backgroundGroup = null;
   }
 
   /**
@@ -211,8 +226,15 @@ export class AuroraOrbitVisualizer {
     if (!QUALITY_PRESETS[level]) return;
     this.quality = level;
     if (this.barsGroup || this.stars) {
+      // Rebuild bars and starfield based on the new quality.  Also
+      // rebuild the floor and background elements so they match the
+      // updated scene scale and palette.  Calling these methods
+      // ensures that all geometry and materials are disposed of
+      // properly and recreated with the correct counts.
       this._buildBars();
       this._buildStarfield();
+      this._buildFloor();
+      this._buildBackground();
     }
   }
 
@@ -255,6 +277,9 @@ export class AuroraOrbitVisualizer {
     // Rebuild bars with new colours
     if (this.barsGroup) {
       this._buildBars();
+      // Refresh the floor and background to reflect new palette choices.
+      this._buildFloor();
+      this._buildBackground();
     }
   }
 
@@ -302,9 +327,11 @@ export class AuroraOrbitVisualizer {
       // Position the camera back a bit further and slightly lower.
       this.camera.position.set(0, 0.5, 6.0);
       this.camera.lookAt(0, 0, 0);
-      // Build starfield and bars
+      // Build starfield, bars, floor and background
       this._buildStarfield();
       this._buildBars();
+      this._buildFloor();
+      this._buildBackground();
       // Observe container size to update aspect ratio and renderer size
       this.resizeObserver = new ResizeObserver((entries) => {
         for (const entry of entries) {
@@ -387,7 +414,6 @@ export class AuroraOrbitVisualizer {
     this.scene.add(this.barsGroup);
     // Reset band map so it will be recomputed on next update
     this.bandMap = null;
-
     // Move the entire ring downward slightly so that it sits closer
     // to the bottom of the stage.  Without this offset the ring
     // appears too high in the frame, leaving awkward empty space
@@ -398,6 +424,106 @@ export class AuroraOrbitVisualizer {
     // vertical space.  A value around -0.3 balances the ring between
     // the header and player bar.
     this.barsGroup.position.y = -0.3;
+    // Initialise per-bar peak state array and store base colours for
+    // highlight blending.  barPeak values decay over time and are
+    // triggered when a bar exceeds a threshold in the update loop.
+    this.barPeak = new Array(this.barCount);
+    for (let i = 0; i < this.barCount; i++) {
+      this.barPeak[i] = 0;
+      const bar = this.bars[i];
+      bar.userData.baseColor = bar.material.color.clone();
+    }
+  }
+
+  /** Build or rebuild the floor disc underneath the bar ring.  The
+   * floor is a flat cylinder that pulses with the overall audio
+   * energy.  Its base and highlight colours are derived from the
+   * current gradient colours.  Rebuilding disposes of old
+   * resources and creates new geometry and materials.
+   */
+  _buildFloor() {
+    if (!this.scene) return;
+    // Remove any existing floor
+    if (this.floor) {
+      this.scene.remove(this.floor);
+      this.floor.geometry.dispose();
+      this.floor.material.dispose();
+      this.floor = null;
+    }
+    // Choose base and highlight colours from the gradient stops.
+    // Use the second stop as the base and the third stop as the highlight.
+    const baseR = gradientColors[1 * 3 + 0];
+    const baseG = gradientColors[1 * 3 + 1];
+    const baseB = gradientColors[1 * 3 + 2];
+    const highlightR = gradientColors[2 * 3 + 0];
+    const highlightG = gradientColors[2 * 3 + 1];
+    const highlightB = gradientColors[2 * 3 + 2];
+    this.floorBaseColor.setRGB(baseR, baseG, baseB);
+    this.floorHighlightColor.setRGB(highlightR, highlightG, highlightB);
+    // Create a flat cylinder disc.  Use a radius slightly larger
+    // than the bar ring to ensure it extends beyond the bars.  A
+    // very thin height prevents z-fighting with the background.
+    const radius = 3.2;
+    const geometry = new THREE.CylinderGeometry(radius, radius, 0.05, 64);
+    const material = new THREE.MeshBasicMaterial({
+      color: this.floorBaseColor.clone(),
+      transparent: true,
+      opacity: 0.5
+    });
+    const disc = new THREE.Mesh(geometry, material);
+    // Position the disc slightly below the bars.  Negative y moves it
+    // downward from the origin, and a small offset prevents
+    // z-fighting with the bar bases.
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = -0.55;
+    this.scene.add(disc);
+    this.floor = disc;
+  }
+
+  /** Build or rebuild a subtle background group of rotating rings.
+   * These elements add visual interest without reacting directly to
+   * the music.  Rings are scaled progressively larger and rotate at
+   * different speeds.  Colours are derived from the gradient stops
+   * and tinted dark to avoid overpowering the bars.
+   */
+  _buildBackground() {
+    if (!this.scene) return;
+    // Remove existing group and dispose of its geometries/materials
+    if (this.backgroundGroup) {
+      this.scene.remove(this.backgroundGroup);
+      this.backgroundGroup.children.forEach((mesh) => {
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+      });
+      this.backgroundGroup = null;
+    }
+    const group = new THREE.Group();
+    // Create a few torus rings at increasing radii.  These rotate
+    // slowly over time; we give each one a different speed in
+    // update().  Colour them using the gradient colours but at
+    // reduced brightness and opacity.
+    const ringCount = 3;
+    for (let i = 0; i < ringCount; i++) {
+      const radius = 3.8 + i * 0.6;
+      const tube = 0.04 + i * 0.02;
+      const geometry = new THREE.TorusGeometry(radius, tube, 16, 64);
+      // Pick a colour from the gradient stops and darken it
+      const index = i % (GRADIENT_STOPS.length);
+      const r = gradientColors[index * 3 + 0];
+      const g = gradientColors[index * 3 + 1];
+      const b = gradientColors[index * 3 + 2];
+      const color = new THREE.Color(r, g, b);
+      color.multiplyScalar(0.3);
+      const material = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.15 });
+      const mesh = new THREE.Mesh(geometry, material);
+      // Orient rings horizontally
+      mesh.rotation.x = Math.PI / 2;
+      // Random starting rotation around Z axis
+      mesh.rotation.z = Math.random() * Math.PI * 2;
+      group.add(mesh);
+    }
+    this.scene.add(group);
+    this.backgroundGroup = group;
   }
 
   /**
@@ -466,19 +592,38 @@ export class AuroraOrbitVisualizer {
     const dt = (now - this.lastTime) / 1000;
     this.lastTime = now;
     const { energy, amplitudes } = this._computeAudioFeatures(freq, wave);
-    // Update bar heights
+    // Update bar heights and compute per-bar highlight effects.  Bars
+    // scale with amplitude and trigger a highlight when exceeding
+    // a threshold.  The highlight decays over time to create
+    // afterglow on peaks.
     for (let i = 0; i < this.bars.length; i++) {
       const mesh = this.bars[i];
       const a = amplitudes[i];
-      // Scale the bar's height based on the current amplitude.  The
-      // previous implementation used a very large scaling factor which
-      // caused the bars to spill out of the viewport.  We reduce the
-      // dynamic range so that the ring remains comfortably framed in
-      // the stage: when a = 0 the bar height is 0.4 units; when a = 1
-      // the bar height reaches 1.9 units.  You can tweak these
-      // constants to suit your taste.
+      // Scale the bar's height based on the current amplitude.
       const scaleY = 0.4 + 1.5 * a;
       mesh.scale.setY(scaleY);
+      // Peak detection: update highlight intensity when amplitude
+      // exceeds a threshold (0.7).  Increase the peak value
+      // proportionally to how far above the threshold the bar is.
+      const threshold = 0.7;
+      const peak = this.barPeak[i];
+      if (a > threshold) {
+        const excess = (a - threshold) / (1 - threshold);
+        this.barPeak[i] = Math.min(1, peak + dt * 4.0 * excess);
+      } else {
+        // Decay the peak using an exponential falloff.  The base
+        // decay rate is chosen so peaks fade over roughly a second.
+        this.barPeak[i] *= Math.pow(0.8, dt * 60.0);
+      }
+      // Compute a blended colour between the bar's base colour and
+      // white based on the highlight intensity.  This creates a
+      // subtle glow on bars that recently peaked.
+      const baseColor = mesh.userData.baseColor;
+      const h = this.barPeak[i];
+      const newR = baseColor.r + (1.0 - baseColor.r) * h;
+      const newG = baseColor.g + (1.0 - baseColor.g) * h;
+      const newB = baseColor.b + (1.0 - baseColor.b) * h;
+      mesh.material.color.setRGB(newR, newG, newB);
     }
     // Rotate the ring slowly.  Energy modulates speed.
     this.barsGroup.rotation.y += dt * (0.2 + energy * 0.6);
@@ -486,6 +631,26 @@ export class AuroraOrbitVisualizer {
     if (this.starUniforms) {
       this.starUniforms.uTime.value = now / 1000;
       this.starUniforms.uBrightness.value = 0.2 + energy * 0.6;
+    }
+    // Update floor disc colour and opacity based on overall energy.
+    if (this.floor) {
+      const val = energy * energy;
+      // Interpolate between base and highlight colours using squared
+      // energy for a smoother ramp.  Also modulate opacity so the
+      // disc pulses with the beat.
+      const c = this.floorBaseColor.clone().lerp(this.floorHighlightColor, val);
+      this.floor.material.color.copy(c);
+      this.floor.material.opacity = 0.4 + energy * 0.4;
+    }
+    // Update background rings: rotate each at a different speed and
+    // adjust opacity with energy to add subtle dynamism.
+    if (this.backgroundGroup) {
+      const children = this.backgroundGroup.children;
+      for (let i = 0; i < children.length; i++) {
+        const ring = children[i];
+        ring.rotation.z += dt * (0.02 + i * 0.04);
+        ring.material.opacity = 0.05 + energy * 0.15;
+      }
     }
     // Camera drift: subtle sinusoidal motion to avoid static view
     const t = now / 1000;
