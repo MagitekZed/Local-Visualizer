@@ -429,6 +429,105 @@ class VisualizerManager {
         reader.readAsArrayBuffer(blob);
       });
     }
+
+    // Attempt to extract an album art palette.  Some parsers expose a
+    // `picture` array or object containing image data.  We only
+    // extract the first image.  The palette is stored on track.palette
+    // as an array of sRGB colours (0..1).  If extraction fails or no
+    // picture exists, palette remains undefined and default colours
+    // will be used.
+    async function extractPaletteFromPicture(picture) {
+      if (!picture || !picture.data) return null;
+      try {
+        const byteArray = picture.data instanceof Uint8Array ? picture.data : new Uint8Array(picture.data);
+        const format = picture.format || 'image/jpeg';
+        const blob = new Blob([byteArray], { type: format });
+        return await new Promise((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'Anonymous';
+          img.onload = function() {
+            const size = 32;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, size, size);
+            const data = ctx.getImageData(0, 0, size, size).data;
+            const hist = {};
+            for (let i = 0; i < data.length; i += 4) {
+              const r = data[i];
+              const g = data[i + 1];
+              const b = data[i + 2];
+              // Quantise to 5 bits per channel
+              const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+              hist[key] = (hist[key] || 0) + 1;
+            }
+            const keys = Object.keys(hist).sort((a, b) => hist[b] - hist[a]);
+            const palette = [];
+            for (let k = 0; k < 3 && k < keys.length; k++) {
+              const key = parseInt(keys[k]);
+              const r = ((key >> 10) & 0x1f) << 3;
+              const g = ((key >> 5) & 0x1f) << 3;
+              const b = (key & 0x1f) << 3;
+              palette.push([r / 255, g / 255, b / 255]);
+            }
+            resolve(palette);
+          };
+          img.onerror = function() {
+            resolve(null);
+          };
+          img.src = URL.createObjectURL(blob);
+        });
+      } catch (err) {
+        console.warn('Palette extraction error:', err);
+        return null;
+      }
+    }
+    // Extract palette from music-metadata-browser picture (if available)
+    // The library may expose picture data in metadata.common.picture
+    if (!track.palette) {
+      try {
+        const mmObject = window.musicMetadata || window.mm || window.musicMetadataBrowser;
+        if (mmObject && typeof mmObject.parseBlob === 'function') {
+          // Already parsed in first step; metadata variable still scoped?  We cannot access it here.
+        }
+        // Instead, attempt to call parseBlob again to extract picture.  This is
+        // inefficient but ensures we can access picture fields.
+        const mmObj = window.musicMetadata || window.mm || window.musicMetadataBrowser;
+        if (mmObj && typeof mmObj.parseBlob === 'function') {
+          const meta = await mmObj.parseBlob(file);
+          const pictures = (meta && meta.common && meta.common.picture) ? meta.common.picture : [];
+          if (pictures && pictures.length) {
+            const palette = await extractPaletteFromPicture(pictures[0]);
+            if (palette && palette.length) track.palette = palette;
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    // Extract palette from jsmediatags picture
+    if (!track.palette && window.jsmediatags) {
+      try {
+        await new Promise((resolve) => {
+          window.jsmediatags.read(file, {
+            onSuccess: async (tag) => {
+              const pic = tag.tags.picture;
+              if (pic) {
+                const palette = await extractPaletteFromPicture(pic);
+                if (palette && palette.length) {
+                  track.palette = palette;
+                }
+              }
+              resolve();
+            },
+            onError: () => resolve()
+          });
+        });
+      } catch (e) {
+        // ignore
+      }
+    }
   }
 
   /**
@@ -496,6 +595,10 @@ class VisualizerManager {
       renderTrackList();
       seekEl.max = 1;
       updateTimeUI();
+      // Apply the colour palette from metadata to the visualiser if available
+      if (t.palette && visualizerManager.impl && typeof visualizerManager.impl.setPalette === 'function') {
+        visualizerManager.impl.setPalette(t.palette);
+      }
       if (autoplay) play();
     };
   }
