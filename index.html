@@ -70,9 +70,11 @@
 
   <!-- Load music-metadata-browser for improved ID3 parsing.  This library
        can parse tags that jsmediatags sometimes misses (e.g. album artist).
-       If it fails to load (due to network restrictions), the app will
-       fall back to jsmediatags. -->
-  <script src="https://cdn.jsdelivr.net/npm/music-metadata-browser/dist/music-metadata-browser.min.js"></script>
+       Specify an explicit version and path to ensure the global
+       `musicMetadata` object is available.  If it fails to load
+       (due to network restrictions), the app will fall back to
+       jsmediatags and ID3v1 parsing. -->
+  <script src="https://cdn.jsdelivr.net/npm/music-metadata-browser@2.5.11/dist/music-metadata-browser.min.js"></script>
   <!-- Load our application as an ES module.  This script bootstraps the audio
        player and visualiser manager, then hands off control to AuroraOrbit. -->
   <script type="module" src="app.js"></script>

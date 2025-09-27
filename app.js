@@ -299,15 +299,17 @@ class VisualizerManager {
    * file is given an ID based on its name, size and lastModified so we
    * don't add duplicates.  After adding, we re-render the track list.
    */
-  function addFiles(fileList) {
+  async function addFiles(fileList) {
     const files = Array.from(fileList).filter((f) => f.type.startsWith('audio/'));
     if (!files.length) return;
-    files.forEach((file) => {
+    // Process each file sequentially so metadata extraction can run in
+    // order.  Using await ensures asynchronous parsing completes
+    // before rendering the list.
+    for (const file of files) {
       const id = `${file.name}-${file.size}-${file.lastModified}`;
       // Skip duplicates based on ID
-      if (STATE.tracks.some((t) => t.id === id)) return;
+      if (STATE.tracks.some((t) => t.id === id)) continue;
       const url = URL.createObjectURL(file);
-      // Default metadata: strip extension from file name for the title
       const defaultTitle = file.name.replace(/\.[^/.]+$/, '');
       const track = {
         id,
@@ -318,91 +320,115 @@ class VisualizerManager {
         artist: '',
         album: ''
       };
+      // Extract metadata asynchronously
+      await extractMetadata(file, track);
       STATE.tracks.push(track);
-      /* Attempt to read metadata using music-metadata-browser first.
-         This library can extract more tag frames (e.g. album artist)
-         than jsmediatags.  If it fails or is unavailable, fall
-         back to jsmediatags. */
-      (async () => {
-        // Determine if music-metadata-browser is available.  The
-        // global may be exported as musicMetadata, mm, or
-        // musicMetadataBrowser depending on the build.  We test
-        // each in turn.
-        const mmLib = (window.musicMetadata && window.musicMetadata.parseBlob) ? window.musicMetadata
-                    : (window.mm && window.mm.parseBlob) ? window.mm
-                    : (window.musicMetadataBrowser && window.musicMetadataBrowser.parseBlob) ? window.musicMetadataBrowser
-                    : null;
-        if (mmLib && typeof mmLib.parseBlob === 'function') {
-          try {
-            const metadata = await mmLib.parseBlob(file);
-            const common = metadata.common || {};
-            if (common.title) track.title = common.title;
-            if (common.artist) track.artist = common.artist;
-            if (common.album) track.album = common.album;
-            // Some files store performers in the "artists" array
-            if (!track.artist && Array.isArray(common.artists) && common.artists.length) {
-              track.artist = common.artists.join(', ');
-            }
-            renderTrackList();
-            return;
-          } catch (err) {
-            console.warn('music-metadata error:', err);
+    }
+    // After all tracks have been processed, render the list and
+    // ensure the first track is loaded if none is selected.
+    renderTrackList();
+    if (STATE.current === -1 && STATE.tracks.length) loadTrack(0, false);
+  }
+
+  /**
+   * Attempt to extract metadata (title, artist, album) from a file.  This
+   * function tries several methods in sequence: music-metadata-browser,
+   * jsmediatags, and a custom ID3v1 parser.  Only missing fields on
+   * the track object will be updated.
+   *
+   * @param {File} file The audio file to parse
+   * @param {Object} track Object to write metadata into
+   */
+  async function extractMetadata(file, track) {
+    // Try music-metadata-browser if available.  The library can be attached
+    // as musicMetadata, mm, or musicMetadataBrowser.  We choose the first
+    // defined and call its parseBlob method.
+    {
+      const mmObject = window.musicMetadata || window.mm || window.musicMetadataBrowser;
+      if (mmObject && typeof mmObject.parseBlob === 'function') {
+        try {
+          const metadata = await mmObject.parseBlob(file);
+          const common = (metadata && metadata.common) ? metadata.common : {};
+          if (common.title && !track.title) track.title = common.title;
+          if (common.artist && !track.artist) track.artist = common.artist;
+          if (common.album && !track.album) track.album = common.album;
+          if (!track.artist && Array.isArray(common.artists) && common.artists.length) {
+            track.artist = common.artists.join(', ');
           }
+        } catch (err) {
+          console.warn('music-metadata error:', err);
         }
-        // Fallback to jsmediatags if present
-        if (!track.title && !track.artist && !track.album && window.jsmediatags) {
+      }
+    }
+    // If the metadata returned a title that is just the file name (without
+    // extension), clear it out so that we can fall back to other methods.
+    if (track.title) {
+      const stem = file.name.replace(/\.[^/.]+$/, '');
+      const normStem = stem.replace(/[^a-z0-9]/gi, '').toLowerCase();
+      const normTitle = track.title.replace(/[^a-z0-9]/gi, '').toLowerCase();
+      if (normTitle === normStem || normTitle.endsWith(normStem)) {
+        track.title = '';
+      }
+    }
+    // Try jsmediatags if still missing
+    if ((!track.title || !track.artist || !track.album) && window.jsmediatags) {
+      try {
+        await new Promise((resolve) => {
           window.jsmediatags.read(file, {
             onSuccess: function(tag) {
               const tags = tag.tags || {};
-              if (tags.title) track.title = tags.title;
-              if (tags.artist) track.artist = tags.artist;
-              if (tags.album) track.album = tags.album;
-              renderTrackList();
+              if (tags.title && !track.title) track.title = tags.title;
+              if (tags.artist && !track.artist) track.artist = tags.artist;
+              if (tags.album && !track.album) track.album = tags.album;
+              resolve();
             },
             onError: function(error) {
               console.warn('jsmediatags error:', error.type, error.info);
+              resolve();
             }
           });
+        });
+      } catch (e) {
+        // ignore errors
+      }
+      // If jsmediatags produced a title that matches the filename, clear it
+      if (track.title) {
+        const stem = file.name.replace(/\.[^/.]+$/, '');
+        const normStem = stem.replace(/[^a-z0-9]/gi, '').toLowerCase();
+        const normTitle = track.title.replace(/[^a-z0-9]/gi, '').toLowerCase();
+        if (normTitle === normStem || normTitle.endsWith(normStem)) {
+          track.title = '';
         }
-        // If still no metadata, attempt to parse ID3v1 tags manually.  Old
-        // files often contain only an ID3v1 tag (last 128 bytes of the
-        // file).  We read the tag synchronously via FileReader and
-        // decode the fields using ISO‑8859‑1.  Update only missing
-        // properties so that metadata from newer tag formats is not
-        // overwritten.
-        if (!track.title && !track.artist && !track.album) {
-          const fileSize = file.size;
-          if (fileSize >= 128) {
-            const blob = file.slice(fileSize - 128, fileSize);
-            const reader = new FileReader();
-            reader.onload = function(e) {
-              const data = new Uint8Array(e.target.result);
-              // Check for "TAG" header
-              if (data[0] === 0x54 && data[1] === 0x41 && data[2] === 0x47) {
-                const decoder = new TextDecoder('iso-8859-1');
-                function decodeField(offset, length) {
-                  const arr = data.slice(offset, offset + length);
-                  let str = decoder.decode(arr);
-                  return str.replace(/\u0000+$/g, '').trim();
-                }
-                const v1Title = decodeField(3, 30);
-                const v1Artist = decodeField(33, 30);
-                const v1Album = decodeField(63, 30);
-                if (v1Title && !track.title) track.title = v1Title;
-                if (v1Artist && !track.artist) track.artist = v1Artist;
-                if (v1Album && !track.album) track.album = v1Album;
-                renderTrackList();
-              }
-            };
-            reader.readAsArrayBuffer(blob);
+      }
+    }
+    // Finally, parse ID3v1 tag manually if still missing.  Many
+    // older MP3 files include only ID3v1 tags at the end of the file.
+    if ((!track.title || !track.artist || !track.album) && file.size >= 128) {
+      await new Promise((resolve) => {
+        const reader = new FileReader();
+        const blob = file.slice(file.size - 128, file.size);
+        reader.onload = function(e) {
+          const data = new Uint8Array(e.target.result);
+          if (data[0] === 0x54 && data[1] === 0x41 && data[2] === 0x47) {
+            const decoder = new TextDecoder('iso-8859-1');
+            function decodeField(offset, length) {
+              const arr = data.slice(offset, offset + length);
+              let str = decoder.decode(arr);
+              return str.replace(/\u0000+$/g, '').trim();
+            }
+            const v1Title = decodeField(3, 30);
+            const v1Artist = decodeField(33, 30);
+            const v1Album = decodeField(63, 30);
+            if (v1Title && !track.title) track.title = v1Title;
+            if (v1Artist && !track.artist) track.artist = v1Artist;
+            if (v1Album && !track.album) track.album = v1Album;
           }
-        }
-      })();
-    });
-    // After adding files, re-render the list and ensure the first track
-    // is loaded (without autoplay) if none is currently selected.
-    renderTrackList();
-    if (STATE.current === -1 && STATE.tracks.length) loadTrack(0, false);
+          resolve();
+        };
+        reader.onloadend = reader.onerror = () => resolve();
+        reader.readAsArrayBuffer(blob);
+      });
+    }
   }
 
   /**
