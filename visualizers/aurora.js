@@ -350,7 +350,9 @@ export class AuroraOrbitVisualizer {
     // to the bottom of the stage.  Without this offset the ring
     // appears too high in the frame, leaving awkward empty space
     // below.  Adjust this value if you change bar scaling.
-    this.barsGroup.position.y = -0.6;
+    // Position the ring slightly lower so it appears centred between
+    // the header and player bar.  This offset can be tuned to taste.
+    this.barsGroup.position.y = -0.4;
   }
 
   /**

@@ -95,8 +95,12 @@ export class AuroraOrbit2DVisualizer {
     // Position the radial gradient slightly below centre.  Placing
     // both the radial glow and the circular spectrum lower in the
     // canvas helps to frame the visualiser closer to the player bar.
-    const r = Math.min(this.width, this.height) * 0.52;
-    const cy = this.height * 0.55;
+    // Build the radial glow centred vertically.  Use 0.5 of the
+    // container height so the glow appears in the middle between
+    // header and player bar.  Reduce the radius slightly to keep
+    // the ring comfortably within the viewport.
+    const r = Math.min(this.width, this.height) * 0.48;
+    const cy = this.height * 0.5;
     this.radialGradient = ctx.createRadialGradient(
       this.width / 2,
       cy,
@@ -187,11 +191,13 @@ export class AuroraOrbit2DVisualizer {
     ctx.fillStyle = this.radialGradient;
     ctx.fillRect(0, 0, w, h);
     const cx = w / 2;
-    // Move the circle downward so it sits closer to the bottom of
-    // the stage.  This aligns with the 3D visualiser, leaving more
-    // breathing room above.  The factor 0.55 was chosen empirically.
-    const cy = h * 0.55;
-    const maxR = Math.min(w, h) * 0.45;
+    // Centre the circle vertically so it sits mid‑way between the
+    // header and player bar.  Using half the height yields a more
+    // balanced composition for the 2D visualiser.
+    const cy = h * 0.5;
+    // Reduce the maximum radius slightly to maintain margins on all
+    // sides.  This keeps the spectrum fully visible within the stage.
+    const maxR = Math.min(w, h) * 0.42;
     // Draw circular spectrum
     ctx.save();
     ctx.translate(cx, cy);
@@ -229,24 +235,31 @@ export class AuroraOrbit2DVisualizer {
     // Instead of placing static dots we animate them smoothly around
     // the ring.  This creates a lively accent that responds to
     // hi-hats and sibilants.
-    const sparkRadius = maxR * 0.8;
-    ctx.beginPath();
+    // Draw dynamic sparkles orbiting the circle.  Each seed advances
+    // over time at a rate influenced by the high‑frequency energy.
+    // We render larger spark pulses whose size and brightness scale
+    // with the highs.  The sparks orbit at an angle determined by
+    // their seed and a global rotation.  A wider radius emphasises
+    // their separation from the main ring.
+    const sparkRadius = maxR * 0.85;
+    // Precompute size and alpha based on highs.  A small base size
+    // ensures sparks are always visible; highs boost both size and
+    // brightness.
+    const sparkSize = 1.5 + this.audioState.highs * 3.0;
+    const sparkleAlpha = 0.3 + this.audioState.highs * 0.7;
     for (let i = 0; i < this.sparkSeeds.length; i++) {
-      // Advance each seed by a base speed plus a component from highs
-      const speed = 0.08 + this.audioState.highs * 0.5;
+      // Advance each seed by a base speed plus a component from highs.
+      const speed = 0.05 + this.audioState.highs * 0.6;
       this.sparkSeeds[i] = (this.sparkSeeds[i] + dt * speed) % 1.0;
       const tSpark = this.sparkSeeds[i];
       const angle = tSpark * Math.PI * 2;
       const x = cx + Math.cos(angle) * sparkRadius;
       const y = cy + Math.sin(angle) * sparkRadius;
-      ctx.moveTo(x, y);
-      ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+      ctx.beginPath();
+      ctx.arc(x, y, sparkSize, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${sparkleAlpha.toFixed(2)})`;
+      ctx.fill();
     }
-    // Colour sparkles based on high frequency energy: brighter
-    // sparkles when highs are strong.
-    const sparkleAlpha = 0.5 + this.audioState.highs * 0.5;
-    ctx.fillStyle = `rgba(255,255,255,${sparkleAlpha.toFixed(2)})`;
-    ctx.fill();
   }
   dispose() {
     // Nothing to dispose for 2D visualiser since canvas is managed by app.js
