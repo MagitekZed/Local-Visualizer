@@ -460,22 +460,50 @@ export class AuroraOrbitVisualizer {
     const highlightB = gradientColors[2 * 3 + 2];
     this.floorBaseColor.setRGB(baseR, baseG, baseB);
     this.floorHighlightColor.setRGB(highlightR, highlightG, highlightB);
-    // Create a flat cylinder disc.  Use a radius slightly larger
-    // than the bar ring to ensure it extends beyond the bars.  A
-    // very thin height prevents z-fighting with the background.
+    // Create a flat disc using a cylinder geometry.  The disc
+    // remains oriented horizontally (no rotation) so it sits flat
+    // beneath the bars.  Use a radius slightly larger than the
+    // bar ring to ensure it extends beyond the bars.  We will
+    // apply a radial gradient texture so the disc appears more
+    // interesting than a solid colour.  A very thin height
+    // prevents z‑fighting with the background.
     const radius = 3.2;
     const geometry = new THREE.CylinderGeometry(radius, radius, 0.05, 64);
+    // Generate a radial gradient texture on the fly.  We draw
+    // into an offscreen canvas to create a smooth gradient from
+    // the highlight colour at the centre out to the base colour at
+    // the edge.  This gives the floor a subtle vignette and
+    // pulse effect when the colours are blended in update().
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    // Convert linear colours back to sRGB for the 2D canvas
+    const toSRGB = (c) => Math.pow(c, 1 / 2.2);
+    const baseCol = new THREE.Color(baseR, baseG, baseB);
+    const highlightCol = new THREE.Color(highlightR, highlightG, highlightB);
+    const baseStyle = `rgb(${Math.round(toSRGB(baseCol.r) * 255)},${Math.round(toSRGB(baseCol.g) * 255)},${Math.round(toSRGB(baseCol.b) * 255)})`;
+    const highlightStyle = `rgb(${Math.round(toSRGB(highlightCol.r) * 255)},${Math.round(toSRGB(highlightCol.g) * 255)},${Math.round(toSRGB(highlightCol.b) * 255)})`;
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, highlightStyle);
+    gradient.addColorStop(1, baseStyle);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipMapLinearFilter;
     const material = new THREE.MeshBasicMaterial({
+      map: texture,
       color: this.floorBaseColor.clone(),
       transparent: true,
-      opacity: 0.5
+      opacity: 0.6
     });
     const disc = new THREE.Mesh(geometry, material);
-    // Position the disc slightly below the bars.  Negative y moves it
-    // downward from the origin, and a small offset prevents
-    // z-fighting with the bar bases.
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.y = -0.55;
+    // Position the disc just below the bars
+    disc.position.y = -0.6;
     this.scene.add(disc);
     this.floor = disc;
   }
@@ -629,8 +657,11 @@ export class AuroraOrbitVisualizer {
     this.barsGroup.rotation.y += dt * (0.2 + energy * 0.6);
     // Update starfield uniforms for twinkle
     if (this.starUniforms) {
+      // Animate the starfield twinkle and adjust brightness.  A higher
+      // base brightness improves visibility of background stars.  As
+      // energy increases the twinkle becomes more pronounced.
       this.starUniforms.uTime.value = now / 1000;
-      this.starUniforms.uBrightness.value = 0.2 + energy * 0.6;
+      this.starUniforms.uBrightness.value = 0.25 + energy * 0.75;
     }
     // Update floor disc colour and opacity based on overall energy.
     if (this.floor) {

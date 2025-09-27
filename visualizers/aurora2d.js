@@ -303,43 +303,76 @@ export class AuroraOrbit2DVisualizer {
     // Advance an internal phase used for animating starburst lines.
     // High-frequency energy increases the rotation speed slightly.
     this.innerPhase = (this.innerPhase + dt * (0.2 + this.audioState.highs * 0.3)) % 1.0;
-    // Draw an inner electric ring that flashes and widens with the
-    // pulse.  Its radius sits well inside the bar ring, leaving
-    // space for bars and providing a focal point in the centre.
-    const ringRadius = maxR * 0.26;
-    const ringThickness = maxR * (0.04 + this.ringPulse * 0.08);
+    // Draw a dynamic inner “electric” ring.  We build a wavy
+    // outline whose outer radius varies with a sinusoid to give
+    // movement.  The base radius and thickness scale with the
+    // available space.  Pulses are emphasised by the squared
+    // energy (ringPulse) which modulates the extra thickness.
+    const ringRadius = maxR * 0.27;
+    const baseThickness = maxR * 0.05;
+    const extraThickness = maxR * 0.10 * this.ringPulse;
     const col = this.paletteColors[1];
-    const ringBrightness = 0.5 + this.ringPulse * 0.6;
+    const ringBrightness = 0.6 + this.ringPulse * 0.7;
     const rr = Math.min(1, col[0] * ringBrightness);
     const rg = Math.min(1, col[1] * ringBrightness);
     const rb = Math.min(1, col[2] * ringBrightness);
+    // Build the wavy ring path
+    const segments = 80;
     ctx.beginPath();
-    ctx.arc(cx, cy, ringRadius + ringThickness, 0, Math.PI * 2);
-    ctx.arc(cx, cy, ringRadius, Math.PI * 2, 0, true);
+    for (let i = 0; i <= segments; i++) {
+      const tSeg = i / segments;
+      const angle = tSeg * Math.PI * 2;
+      // Use a higher frequency sine wave to add more “electrical” spikes.
+      const wave = 0.5 + 0.5 * Math.sin((tSeg * 8.0 + this.innerPhase * 12.0) * Math.PI * 2);
+      const thickness = baseThickness + extraThickness * wave;
+      const rOut = ringRadius + thickness;
+      const x = cx + Math.cos(angle) * rOut;
+      const y = cy + Math.sin(angle) * rOut;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    // Inner boundary to close the shape
+    for (let i = segments; i >= 0; i--) {
+      const tSeg = i / segments;
+      const angle = tSeg * Math.PI * 2;
+      const innerX = cx + Math.cos(angle) * ringRadius;
+      const innerY = cy + Math.sin(angle) * ringRadius;
+      ctx.lineTo(innerX, innerY);
+    }
     ctx.closePath();
-    ctx.fillStyle = `rgba(${Math.round(rr * 255)},${Math.round(rg * 255)},${Math.round(rb * 255)},0.9)`;
-    ctx.shadowBlur = this.settings.glow * 1.5;
+    ctx.fillStyle = `rgba(${Math.round(rr * 255)},${Math.round(rg * 255)},${Math.round(rb * 255)},0.85)`;
+    ctx.shadowBlur = this.settings.glow * 2.0;
     ctx.shadowColor = `rgba(${Math.round(rr * 255)},${Math.round(rg * 255)},${Math.round(rb * 255)},0.7)`;
     ctx.fill();
     ctx.shadowBlur = 0;
-    // Draw rotating starburst lines emanating from the inner ring.  The
-    // number of lines and their properties can be tuned to taste.
-    const starCount = 8;
-    for (let j = 0; j < starCount; j++) {
-      const angle = (j / starCount + this.innerPhase) * Math.PI * 2;
-      const length = ringThickness * 1.2 + this.audioState.highs * maxR * 0.05;
-      const xStart = cx + Math.cos(angle) * ringRadius;
-      const yStart = cy + Math.sin(angle) * ringRadius;
-      const xEnd = cx + Math.cos(angle) * (ringRadius + length);
-      const yEnd = cy + Math.sin(angle) * (ringRadius + length);
+    // Draw a starburst inside the electric ring.  This consists
+    // of radial lines that rotate over time.  The length and
+    // thickness of the lines respond to high‑frequency energy,
+    // creating additional motion when cymbals and vocals are
+    // present.
+    const starCount = 16;
+    const baseLength = ringRadius * 0.5;
+    const extraLength = ringRadius * 0.6 * this.audioState.highs;
+    const starColor = `rgba(${Math.round(rr * 255)},${Math.round(rg * 255)},${Math.round(rb * 255)},0.8)`;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.strokeStyle = starColor;
+    ctx.lineWidth = 1.5 + 2.0 * this.audioState.highs;
+    ctx.shadowBlur = this.settings.glow * 1.2;
+    ctx.shadowColor = starColor;
+    for (let i = 0; i < starCount; i++) {
+      const angle = (i / starCount + this.innerPhase) * Math.PI * 2;
+      const len = baseLength + extraLength * (0.5 + 0.5 * Math.sin(i + this.innerPhase * 4.0));
+      const x0 = Math.cos(angle) * ringRadius * 0.4;
+      const y0 = Math.sin(angle) * ringRadius * 0.4;
+      const x1 = Math.cos(angle) * (ringRadius * 0.4 + len);
+      const y1 = Math.sin(angle) * (ringRadius * 0.4 + len);
       ctx.beginPath();
-      ctx.moveTo(xStart, yStart);
-      ctx.lineTo(xEnd, yEnd);
-      const starAlpha = 0.4 + this.ringPulse * 0.6;
-      ctx.strokeStyle = `rgba(${Math.round(rr * 255)},${Math.round(rg * 255)},${Math.round(rb * 255)},${starAlpha.toFixed(2)})`;
-      ctx.lineWidth = 1.0 + this.audioState.highs * 2.0;
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
       ctx.stroke();
     }
+    ctx.restore();
   }
   dispose() {
     // Nothing to dispose for 2D visualiser since canvas is managed by app.js
