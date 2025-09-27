@@ -67,6 +67,12 @@
   <audio id="audio" crossorigin="anonymous"></audio>
   <!-- Load jsmediatags library for reading ID3 tags -->
   <script src="https://cdn.jsdelivr.net/npm/jsmediatags@3.9.5/dist/jsmediatags.min.js"></script>
+
+  <!-- Load music-metadata-browser for improved ID3 parsing.  This library
+       can parse tags that jsmediatags sometimes misses (e.g. album artist).
+       If it fails to load (due to network restrictions), the app will
+       fall back to jsmediatags. -->
+  <script src="https://cdn.jsdelivr.net/npm/music-metadata-browser/dist/music-metadata-browser.min.js"></script>
   <!-- Load our application as an ES module.  This script bootstraps the audio
        player and visualiser manager, then hands off control to AuroraOrbit. -->
   <script type="module" src="app.js"></script>

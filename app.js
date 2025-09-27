@@ -319,26 +319,52 @@ class VisualizerManager {
         album: ''
       };
       STATE.tracks.push(track);
-      // Attempt to read ID3 tags using jsmediatags.  This library is
-      // loaded globally via a script tag in index.html.  We read the
-      // track's metadata asynchronously and update the track object
-      // when available.  If tags are missing we leave the defaults.
-      if (window.jsmediatags) {
-        window.jsmediatags.read(file, {
-          onSuccess: function(tag) {
-            const tags = tag.tags || {};
-            if (tags.title) track.title = tags.title;
-            if (tags.artist) track.artist = tags.artist;
-            if (tags.album) track.album = tags.album;
-            // Re-render the list to show updated metadata
+      /* Attempt to read metadata using music-metadata-browser first.
+         This library can extract more tag frames (e.g. album artist)
+         than jsmediatags.  If it fails or is unavailable, fall
+         back to jsmediatags. */
+      (async () => {
+        // Determine if music-metadata-browser is available.  The
+        // global may be exported as musicMetadata, mm, or
+        // musicMetadataBrowser depending on the build.  We test
+        // each in turn.
+        const mmLib = (window.musicMetadata && window.musicMetadata.parseBlob) ? window.musicMetadata
+                    : (window.mm && window.mm.parseBlob) ? window.mm
+                    : (window.musicMetadataBrowser && window.musicMetadataBrowser.parseBlob) ? window.musicMetadataBrowser
+                    : null;
+        if (mmLib && typeof mmLib.parseBlob === 'function') {
+          try {
+            const metadata = await mmLib.parseBlob(file);
+            const common = metadata.common || {};
+            if (common.title) track.title = common.title;
+            if (common.artist) track.artist = common.artist;
+            if (common.album) track.album = common.album;
+            // Some files store performers in the "artists" array
+            if (!track.artist && Array.isArray(common.artists) && common.artists.length) {
+              track.artist = common.artists.join(', ');
+            }
             renderTrackList();
-          },
-          onError: function(error) {
-            // We ignore metadata errors and keep defaults
-            console.warn('jsmediatags error:', error.type, error.info);
+            return;
+          } catch (err) {
+            console.warn('music-metadata error:', err);
           }
-        });
-      }
+        }
+        // Fallback to jsmediatags if present
+        if (window.jsmediatags) {
+          window.jsmediatags.read(file, {
+            onSuccess: function(tag) {
+              const tags = tag.tags || {};
+              if (tags.title) track.title = tags.title;
+              if (tags.artist) track.artist = tags.artist;
+              if (tags.album) track.album = tags.album;
+              renderTrackList();
+            },
+            onError: function(error) {
+              console.warn('jsmediatags error:', error.type, error.info);
+            }
+          });
+        }
+      })();
     });
     // After adding files, re-render the list and ensure the first track
     // is loaded (without autoplay) if none is currently selected.
