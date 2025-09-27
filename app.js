@@ -6,6 +6,63 @@
 import { AuroraOrbitVisualizer } from './visualizers/aurora.js';
 import { AuroraOrbit2DVisualizer } from './visualizers/aurora2d.js';
 
+// -----------------------------------------------------------------------------
+// Genre‑based colour palettes and fallbacks
+//
+// When no album art is embedded in a track, we still want the visualiser to
+// reflect the mood of the music.  The following map associates common
+// musical genres with three sRGB colours (0..1 range).  These palettes are
+// inspired by basic colour theory (triads, complementary and analogous
+// schemes) and typical emotions expressed in each genre.  If a track’s genre
+// matches a key (case insensitive substring match), the corresponding
+// palette will be used.  When no genre match is found we fall back to a
+// randomly chosen palette from DEFAULT_PALETTES.  Feel free to extend this
+// map with additional genres or tweak the colours to suit your taste.
+const GENRE_PALETTES = {
+  // Heavy metal and hard rock: dark, aggressive tones with a red accent
+  metal:      [[0.05, 0.05, 0.05], [0.6, 0.0, 0.0], [0.2, 0.2, 0.2]],
+  rock:       [[0.05, 0.1, 0.25], [0.55, 0.0, 0.2], [0.4, 0.4, 0.45]],
+  // Indie and alternative: muted, earthy tones with a hint of warmth
+  indie:      [[0.79, 0.65, 0.63], [0.38, 0.48, 0.53], [0.74, 0.69, 0.38]],
+  alternative:[[0.79, 0.65, 0.63], [0.38, 0.48, 0.53], [0.74, 0.69, 0.38]],
+  // Pop: bright, upbeat colours
+  pop:        [[0.93, 0.24, 0.62], [0.0, 0.74, 0.83], [1.0, 0.92, 0.29]],
+  // Hip‑hop / rap: dark with gold and purple accents
+  hiphop:     [[0.0, 0.0, 0.0], [0.75, 0.64, 0.0], [0.29, 0.0, 0.51]],
+  rap:        [[0.0, 0.0, 0.0], [0.75, 0.64, 0.0], [0.29, 0.0, 0.51]],
+  // Classical: elegant neutrals with gold highlights
+  classical:  [[0.84, 0.78, 0.65], [0.06, 0.16, 0.33], [0.77, 0.65, 0.32]],
+  // Jazz: deep night tones with warm highlights
+  jazz:       [[0.17, 0.23, 0.4], [0.47, 0.15, 0.22], [0.42, 0.36, 0.29]],
+  // Electronic / EDM: neon brights with dark background
+  electronic: [[0.0, 1.0, 0.83], [1.0, 0.18, 0.58], [0.48, 0.0, 1.0]],
+  edm:        [[0.0, 1.0, 0.83], [1.0, 0.18, 0.58], [0.48, 0.0, 1.0]],
+  // Country: natural earth tones
+  country:    [[0.42, 0.31, 0.31], [0.55, 0.66, 0.53], [0.85, 0.37, 0.22]],
+  // Folk: rustic, outdoorsy hues
+  folk:       [[0.12, 0.37, 0.2], [0.85, 0.49, 0.05], [0.36, 0.66, 0.77]],
+  // Soul / R&B: rich, soulful hues
+  soul:       [[0.14, 0.05, 0.33], [0.75, 0.25, 0.48], [0.58, 0.36, 0.15]],
+  rnb:        [[0.14, 0.05, 0.33], [0.75, 0.25, 0.48], [0.58, 0.36, 0.15]],
+  // Reggae: Rastafarian colours
+  reggae:     [[0.9, 0.07, 0.29], [0.95, 0.82, 0.07], [0.0, 0.54, 0.27]],
+  // Blues: somber yet hopeful tones
+  blues:      [[0.16, 0.22, 0.52], [0.0, 0.51, 0.56], [0.99, 0.85, 0.21]],
+  // Dance / House: energetic, club‑inspired hues
+  dance:      [[0.0, 0.77, 0.8], [0.71, 0.88, 0.0], [0.63, 0.28, 0.89]],
+  house:      [[0.0, 0.77, 0.8], [0.71, 0.88, 0.0], [0.63, 0.28, 0.89]]
+};
+
+// Fallback palettes used when no genre match is found.  Each entry is an
+// array of three sRGB colours chosen to contrast nicely and evoke a general
+// mood.  These can be cycled randomly to keep the visuals fresh.
+const DEFAULT_PALETTES = [
+  [[0.89, 0.27, 0.58], [0.0, 0.62, 0.8], [0.5, 0.8, 0.2]],
+  [[0.91, 0.45, 0.08], [0.18, 0.69, 0.27], [0.04, 0.26, 0.5]],
+  [[0.56, 0.23, 0.68], [0.9, 0.3, 0.24], [0.98, 0.83, 0.0]],
+  [[0.14, 0.57, 0.82], [0.89, 0.23, 0.34], [0.5, 0.4, 0.8]]
+];
+
 class VisualizerManager {
   constructor() {
     this.container = null;
@@ -338,7 +395,10 @@ class VisualizerManager {
         duration: 0,
         title: defaultTitle,
         artist: '',
-        album: ''
+        album: '',
+        // genre and palette will be populated during metadata extraction
+        genre: '',
+        palette: undefined
       };
       // Extract metadata asynchronously
       await extractMetadata(file, track);
@@ -375,6 +435,15 @@ class VisualizerManager {
           if (!track.artist && Array.isArray(common.artists) && common.artists.length) {
             track.artist = common.artists.join(', ');
           }
+          // Capture genre if available.  music-metadata may provide an array
+          // or a single string.  We store a lowercase string for matching.
+          if (!track.genre && common.genre) {
+            if (Array.isArray(common.genre)) {
+              track.genre = common.genre.join(', ');
+            } else {
+              track.genre = common.genre;
+            }
+          }
         } catch (err) {
           console.warn('music-metadata error:', err);
         }
@@ -400,6 +469,9 @@ class VisualizerManager {
               if (tags.title && !track.title) track.title = tags.title;
               if (tags.artist && !track.artist) track.artist = tags.artist;
               if (tags.album && !track.album) track.album = tags.album;
+              // jsmediatags exposes genre as a string.  Capture it for
+              // fallback palette selection.
+              if (!track.genre && tags.genre) track.genre = tags.genre;
               resolve();
             },
             onError: function(error) {
@@ -546,6 +618,33 @@ class VisualizerManager {
         });
       } catch (e) {
         // ignore
+      }
+    }
+
+    // If still no palette, derive one based on genre or choose a random
+    // fallback.  We perform a substring match on the genre string to
+    // select a palette from GENRE_PALETTES.  If no match, a random
+    // entry from DEFAULT_PALETTES is chosen.  This ensures every
+    // track has a colour scheme even without embedded artwork.
+    if (!track.palette) {
+      let genreStr = '';
+      if (track.genre && typeof track.genre === 'string') {
+        genreStr = track.genre.toLowerCase();
+      }
+      let matchedPalette = null;
+      if (genreStr) {
+        for (const key in GENRE_PALETTES) {
+          if (genreStr.includes(key)) {
+            matchedPalette = GENRE_PALETTES[key];
+            break;
+          }
+        }
+      }
+      if (matchedPalette) {
+        track.palette = matchedPalette;
+      } else {
+        const idx = Math.floor(Math.random() * DEFAULT_PALETTES.length);
+        track.palette = DEFAULT_PALETTES[idx];
       }
     }
   }
