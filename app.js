@@ -95,6 +95,16 @@ class VisualizerManager {
         this.activeType = 'webgl';
         // Hide fallback canvas so it doesn't overlay the WebGL canvas
         if (this.fallbackCanvas) this.fallbackCanvas.style.display = 'none';
+        // Apply current track palette to the new visualiser if available
+        try {
+          if (typeof vis.setPalette === 'function' && typeof STATE !== 'undefined' &&
+              STATE.current !== undefined && STATE.tracks && STATE.tracks[STATE.current] &&
+              STATE.tracks[STATE.current].palette) {
+            vis.setPalette(STATE.tracks[STATE.current].palette);
+          }
+        } catch (err) {
+          console.warn('Failed to set palette on WebGL visualiser:', err);
+        }
       } catch (err) {
         console.warn('AuroraOrbitVisualizer failed, falling back to 2D:', err);
         this.impl = null;
@@ -111,6 +121,16 @@ class VisualizerManager {
       this.activeType = '2d';
       // Ensure the fallback canvas is visible
       if (this.fallbackCanvas) this.fallbackCanvas.style.display = 'block';
+      // Apply current track palette to the 2D visualiser if available
+      try {
+        if (typeof fallback.setPalette === 'function' && typeof STATE !== 'undefined' &&
+            STATE.current !== undefined && STATE.tracks && STATE.tracks[STATE.current] &&
+            STATE.tracks[STATE.current].palette) {
+          fallback.setPalette(STATE.tracks[STATE.current].palette);
+        }
+      } catch (err) {
+        console.warn('Failed to set palette on 2D visualiser:', err);
+      }
     }
     // Resize the visualiser to the current container size
     const width = this.lastWidth || this.container.clientWidth;
