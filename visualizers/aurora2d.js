@@ -20,9 +20,13 @@ export class AuroraOrbit2DVisualizer {
     this.sampleRate = 44100;
     this.bandMap = null;
     this.barValues = new Float32Array(128);
+    // Default settings.  We assign this before creating raySeeds so
+    // that sparkCount exists when allocating the array.  These
+    // values will be overridden when setQuality() is called.
+    this.settings = { bars: 48, glow: 26, sparkCount: 180 };
     // Seeds controlling the phase of each radial ray.  The number of
     // rays will be set in setQuality().  For now initialise with
-    // default sparkCount from settings.
+    // the default sparkCount from settings.
     this.raySeeds = new Float32Array(this.settings.sparkCount);
     this.audioState = {
       energy: 0,
@@ -31,7 +35,6 @@ export class AuroraOrbit2DVisualizer {
       highs: 0
     };
     this.quality = 'high';
-    this.settings = { bars: 48, glow: 26, sparkCount: 180 };
     this.bgGradient = null;
     this.radialGradient = null;
     this.lastHue = Math.random();
