@@ -350,7 +350,7 @@ class VisualizerManager {
           }
         }
         // Fallback to jsmediatags if present
-        if (window.jsmediatags) {
+        if (!track.title && !track.artist && !track.album && window.jsmediatags) {
           window.jsmediatags.read(file, {
             onSuccess: function(tag) {
               const tags = tag.tags || {};
@@ -363,6 +363,39 @@ class VisualizerManager {
               console.warn('jsmediatags error:', error.type, error.info);
             }
           });
+        }
+        // If still no metadata, attempt to parse ID3v1 tags manually.  Old
+        // files often contain only an ID3v1 tag (last 128 bytes of the
+        // file).  We read the tag synchronously via FileReader and
+        // decode the fields using ISO‑8859‑1.  Update only missing
+        // properties so that metadata from newer tag formats is not
+        // overwritten.
+        if (!track.title && !track.artist && !track.album) {
+          const fileSize = file.size;
+          if (fileSize >= 128) {
+            const blob = file.slice(fileSize - 128, fileSize);
+            const reader = new FileReader();
+            reader.onload = function(e) {
+              const data = new Uint8Array(e.target.result);
+              // Check for "TAG" header
+              if (data[0] === 0x54 && data[1] === 0x41 && data[2] === 0x47) {
+                const decoder = new TextDecoder('iso-8859-1');
+                function decodeField(offset, length) {
+                  const arr = data.slice(offset, offset + length);
+                  let str = decoder.decode(arr);
+                  return str.replace(/\u0000+$/g, '').trim();
+                }
+                const v1Title = decodeField(3, 30);
+                const v1Artist = decodeField(33, 30);
+                const v1Album = decodeField(63, 30);
+                if (v1Title && !track.title) track.title = v1Title;
+                if (v1Artist && !track.artist) track.artist = v1Artist;
+                if (v1Album && !track.album) track.album = v1Album;
+                renderTrackList();
+              }
+            };
+            reader.readAsArrayBuffer(blob);
+          }
         }
       })();
     });
